@@ -3,10 +3,12 @@ let ort, session, provider;
 const MEAN = [0.485, 0.456, 0.406], STD = [0.229, 0.224, 0.225];
 
 async function init(variant, pref) {
-  ort = await import(/* @vite-ignore */ self.location.origin + '/ort/ort.all.min.mjs');
-  ort.env.wasm.wasmPaths = self.location.origin + '/ort/';
+  // Dev: local copies. Production (static hosting with per-file size limits): official CDNs.
+  const ORT_BASE = import.meta.env.DEV ? self.location.origin + '/ort/' : 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/';
+  ort = await import(/* @vite-ignore */ ORT_BASE + 'ort.all.min.mjs');
+  ort.env.wasm.wasmPaths = ORT_BASE;
   ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
-  const base = self.location.origin + '/models/dinov3-s16/';
+  const base = import.meta.env.DEV ? self.location.origin + '/models/dinov3-s16/' : 'https://huggingface.co/onnx-community/dinov3-vits16-pretrain-lvd1689m-ONNX/resolve/main/onnx/';
   const file = variant === 'q8' ? 'model_quantized' : 'model';
   const [onnx, data] = await Promise.all([fetchWithProgress(base + file + '.onnx'), fetchWithProgress(base + file + '.onnx_data', true)]);
   const opts = (ep) => ({ executionProviders: [ep], externalData: [{ path: file + '.onnx_data', data }], graphOptimizationLevel: 'all' });
