@@ -16,111 +16,219 @@
   .kb .keys button { padding: 4px 0; font: 600 11px var(--mono); }
   .kb .keys button.down { background: var(--act); color: var(--bg); border-color: var(--act); }
   .kb .absent { margin-top: 6px; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-  .bars canvas { width: 100%; height: auto; display: block; }
   .flow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
   @media (max-width: 900px) { .flow { grid-template-columns: 1fr; } }
   .flow .stage { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
   .flow .stage h4 { margin: 0 0 4px; font-size: 13px; }
   .flow .stage canvas { width: 100%; height: auto; display: block; }
+  table.map td:first-child { color: var(--muted); width: 38%; }
+  .att { display: grid; grid-template-columns: 1fr 1.25fr; gap: 18px; }
+  @media (max-width: 900px) { .att { grid-template-columns: 1fr; } }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .card { background: var(--bg2); border: 2px solid var(--line); border-radius: 10px; padding: 6px; cursor: pointer; text-align: center; font-size: 11.5px; transition: border-color .15s; }
+  .card canvas { width: 100%; border-radius: 6px; display: block; margin-bottom: 4px; }
+  .card.q { border-color: #fff; }
+  .card .w { height: 5px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .card .w > div { height: 100%; background: var(--wm); }
+  .steps { counter-reset: st; }
+  .steps > div.st { position: relative; padding-left: 34px; margin: 10px 0; }
+  .steps > div.st::before { counter-increment: st; content: counter(st); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%; background: var(--panel2); border: 1px solid var(--line); font: 700 12px var(--mono); display: grid; place-items: center; }
+  .mathbox { font-family: var(--mono); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; line-height: 1.8; overflow-x: auto; }
+  .glossary dt { font-weight: 700; margin-top: 10px; }
+  .glossary dd { margin: 2px 0 0 0; color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
   <section class="hero">
-    <div class="kicker">Chapter 04 · Sections 4.4–4.5 of the paper</div>
-    <h1>Inside the <span class="c-wm">transformer</span>: tokens, space-time attention and AdaLN</h1>
-    <p class="lede">The world model is a 5B-parameter <b>diffusion transformer</b>. Each forward pass takes the noisy next latent plus the past
-      latents, the players' keys and the noise level τ, and outputs the flow velocity from Chapter 02. This chapter opens it up. You'll see how a
-      latent becomes tokens, how attention is split into "space" and "time" to make it affordable, and how keyboard presses steer
-      every layer.</p>
+    <div class="kicker">Chapter 04 · Sections 4.4–4.5 of the paper · written for makemore graduates</div>
+    <h1>Inside the <span class="c-wm">transformer</span>, starting from makemore</h1>
+    <p class="lede">If you've built makemore, you already know most of the ingredients: embeddings, a context window, an MLP, a
+      normalisation layer with a learnable gain and bias, and "predict the next thing". This chapter adds just two new ideas:
+      <b>attention</b> (tokens fetching information from each other) and <b>conditioning the normalisation on the keyboard</b>. Each is explained
+      from scratch, with something to click.</p>
   </section>
 
-  <h2>1 · From latents to tokens</h2>
+  <h2>0 · What you already know, mapped onto MIRA</h2>
+  <table class="t map">
+    <tr><th>In makemore…</th><th>In MIRA's world model…</th></tr>
+    <tr><td>one <b>character</b> is the unit the model reads</td><td>one <b>token</b> = one cell of the latent grid. It is a vector of 32 numbers describing a 32×32-pixel patch of one player's screen (Ch. 01)</td></tr>
+    <tr><td>embedding table <code>C</code> turns a character into a vector of size <code>n_embd</code></td><td>a linear layer turns each cell's 32 numbers into a vector of <b>4096</b> numbers (the model's "n_embd")</td></tr>
+    <tr><td><code>block_size</code> = the 3 (or 8) previous characters</td><td>the previous <b>20 frames</b>, each holding 576 tokens: 11,520 tokens of context</td></tr>
+    <tr><td>MLP: <i>concatenate</i> the context embeddings, then hidden layer, then output</td><td>a stack of 16 <b>blocks</b>. In each, <b>attention</b> lets tokens mix information, then an <b>MLP</b> processes each token on its own</td></tr>
+    <tr><td><code>BatchNorm</code> with learnable <code>bngain</code>, <code>bnbias</code></td><td><code>LayerNorm</code>, whose gain and bias are <i>computed from the keys being pressed</i> (AdaLN, section 5)</td></tr>
+    <tr><td>output: 27 logits, cross-entropy loss</td><td>output: a <b>velocity</b> for every token (Ch. 02), mean-squared-error loss</td></tr>
+    <tr><td>at sampling: pick a char, append it, slide the window</td><td>at sampling: generate a frame, append it, slide the window (Ch. 06)</td></tr>
+  </table>
+
+  <h2>1 · What exactly is a token here?</h2>
   <div class="grid2">
     <div class="prose">
-      <p>Each latent cell (32 numbers, covering 32×32 pixels) is linearly embedded into one token. <b>Patch size is 1</b>, so
-        one cell is one token. The four players' 9×16 grids are <b>stacked along the height</b> into a single 36×16 grid. That gives
-        576 tokens per latent frame, and the context window holds 20 frames (2 s at 10 Hz).</p>
-      <p>Positions are encoded with <b>factorised RoPE</b>: 2-D rotary embeddings across the grid and a separate temporal rotary
-        embedding indexed <i>in seconds</i>. Rotary embeddings encode only <i>relative</i> offsets, so no weights are tied to a grid size. That
-        is why a single-player model (9×16 grid) can be warm-started into the 4-player model (36×16 grid) with the exact same weights.</p>
+      <p>The codec (Ch. 01) turns every player's screen into a small grid of vectors. For one moment in time, the world model's input is</p>
+      <p style="font-size:17px"><span data-shape="4:players,9:rows,16:columns,32:channels per cell"></span></p>
+      <p>MIRA <b>stacks the four players' grids on top of each other</b>, like four images glued vertically, into one tall grid:</p>
+      <p style="font-size:17px"><span data-shape="36:rows = 4 players × 9,16:columns,32:channels"></span></p>
+      <p>Every one of the <b>36 (rows) × 16 (columns) = 576 cells is a token</b>. Like makemore's characters, each token is first turned into a bigger vector:
+        a linear layer maps 32 → 4096 numbers. From here on, each token is a vector of 4096 numbers that gets refined block after block.</p>
+      <p>The model looks at <b>20 consecutive frames</b> at once (2 s of game, at 10 latent frames per second), so it sees
+        <span data-shape="20:frames,576:tokens per frame"></span> = 11,520 tokens.</p>
     </div>
-    <div class="grid2" style="gap:10px">
-      <div class="stat"><div class="v c-lat">32</div><div class="k">channels per latent cell</div></div>
-      <div class="stat"><div class="v c-wm">4096</div><div class="k">token width in the 5B model</div></div>
-      <div class="stat"><div class="v">36×16 = 576</div><div class="k">tokens per frame (4 tiled views)</div></div>
-      <div class="stat"><div class="v">× 20</div><div class="k">frames of context at inference</div></div>
-      <div class="stat"><div class="v">11,520</div><div class="k">tokens in the context window</div></div>
-      <div class="stat"><div class="v">16 layers</div><div class="k">32 query heads / 8 KV heads (GQA)</div></div>
+    <div class="demo" style="margin:0">
+      <div class="demo-head"><h3>From screen to tokens</h3><span class="badge viz">exact shapes</span></div>
+      <svg id="tokSvg" viewBox="0 0 560 420" style="width:100%;height:auto"></svg>
     </div>
   </div>
 
-  <h2>2 · Who attends to whom</h2>
+  <h2>2 · The problem attention solves</h2>
+  <div class="prose">
+    <p>In makemore, the MLP glued the context together by <b>concatenation</b>: 3 characters × 10 dims became one 30-number input. Each slot
+      had fixed weights: "slot 1 means the character three steps back".</p>
+    <p>Doing that here would mean concatenating 11,520 tokens × 4096 numbers, which is <b>47 million inputs</b> into one layer. Worse, the useful
+      connections <i>move</i>. When the ball flies across P1's screen, the token that needs to "know about the ball" in P3's view is a different
+      one every frame. Fixed slots can't follow that.</p>
+    <p><b>Attention</b> replaces fixed slots with a lookup by <i>content</i>. Every token can ask "who out there is relevant to me?" and take a
+      weighted average of the answers. The weights are computed fresh on every forward pass.</p>
+  </div>
+
+  <h2>3 · Attention, worked out by hand</h2>
+  <div class="att">
+    <div class="prose steps">
+      <p>Each token produces three vectors, each via its own learned linear layer (just matrix multiplies, like <code>C</code> or <code>W1</code> in makemore):</p>
+      <div class="st"><b class="c-wm">query q</b>: "what am I looking for?"</div>
+      <div class="st"><b class="c-noise">key k</b>: "what do I contain?" (how I advertise myself)</div>
+      <div class="st"><b class="c-dec">value v</b>: "what I'll hand over if you pick me"</div>
+      <p>Then, for one query token:</p>
+      <div class="mathbox">
+        score<sub>j</sub> = q · k<sub>j</sub> / √d &nbsp;&nbsp;<span class="muted"># dot product = similarity</span><br />
+        w = softmax(score) &nbsp;&nbsp;<span class="muted"># same softmax as makemore's logits → probs</span><br />
+        out = Σ<sub>j</sub> w<sub>j</sub> · v<sub>j</sub> &nbsp;&nbsp;<span class="muted"># weighted average of values</span><br />
+        x = x + out &nbsp;&nbsp;<span class="muted"># add it to the token (residual)</span>
+      </div>
+      <p>That's all of attention. Every token does this at the same time, so in practice it is a few big matrix multiplications.
+        (If you go on to Karpathy's <i>"Let's build GPT"</i>, this is exactly its self-attention head.)</p>
+      <p class="muted">In the demo the vectors are hand-made and readable: 4 numbers meaning "ball-ness, car-ness, sky/stadium-ness, clock-ness". In MIRA they
+        are 4096-dimensional and <i>learned</i>, but the arithmetic is identical. The paper shows the trained model really does this: a token on P1's car
+        attends to that same car in the other players' views (Fig. 17).</p>
+    </div>
+    <div class="demo" style="margin:0" id="demoAtt">
+      <div class="demo-head"><h3>One attention lookup</h3><span class="badge real">real softmax arithmetic · hand-made vectors</span></div>
+      <p class="note" style="margin-top:0">Click a token to make it the <b>query</b>. The bar under each card is the attention weight it receives.</p>
+      <div class="cards" id="cards"></div>
+      <div class="controls">
+        <label>sharpness (scales the scores) <input type="range" id="sharp" min="0" max="3" step="0.05" value="1.4" /> <b class="mono" id="sharpV"></b></label>
+      </div>
+      <canvas id="cvAtt" width="620" height="250" style="width:100%"></canvas>
+    </div>
+  </div>
+
+  <h2>4 · 11,520 tokens is too many, so split space and time</h2>
+  <div class="prose">
+    <p>If every token attended to every other token, each step would compute 11,520 (query tokens) × 11,520 (key tokens) ≈ <b>133 million scores</b> per layer, and that number
+      grows with the <i>square</i> of the context. MIRA uses two cheaper kinds of attention layers and alternates them:</p>
+    <ul>
+      <li><b class="c-wm">Space layer</b>: a token attends only to the 576 tokens <b>of its own frame</b>, across all 4 players' views. This is how the four views stay
+        consistent: P3's view can "ask" P1's view where the ball is.</li>
+      <li><b class="c-noise">Time layer</b>: a token attends only to <b>the same cell in earlier frames</b>. This carries motion and memory. It is
+        <b>causal</b>: a frame can never look at a later frame, for the same reason makemore never peeks at the character it is predicting.</li>
+    </ul>
+  </div>
   <div class="demo" id="demoAttn">
-    <div class="demo-head"><h3>Factorised space-time attention</h3><span class="badge viz">exact token layout · real MIRA frames underneath</span></div>
+    <div class="demo-head"><h3>Who attends to whom</h3><span class="badge viz">exact token layout · real MIRA frames underneath</span></div>
     <div class="controls">
-      <div class="seg" id="attnMode"><button data-m="space" class="on">space layer</button><button data-m="time">time layer</button><button data-m="full">naive full attention</button></div>
-      <span class="tag">hover / tap a token in the big frame (it's frame t, the newest one)</span>
+      <div class="seg" id="attnMode"><button data-m="space" class="on">space layer</button><button data-m="time">time layer</button><button data-m="full">naive: everything</button></div>
+      <span class="tag">hover / tap a token in the tall frame on the left (it is the newest frame, "t")</span>
     </div>
     <div class="tok">
       <div><canvas id="cvFrame" width="300" height="690"></canvas></div>
       <div>
         <canvas id="cvStrip" width="860" height="420"></canvas>
         <div class="grid3" style="margin-top:12px">
-          <div class="stat"><div class="v" id="pairsFull">132.7M</div><div class="k">query-key pairs, naive full attention over 11,520 tokens</div></div>
-          <div class="stat"><div class="v c-wm" id="pairsSpace">6.6M</div><div class="k">space layers: 20 frames × 576²</div></div>
-          <div class="stat"><div class="v c-noise" id="pairsTime">121k</div><div class="k">time layers: 576 positions × causal 20×21/2</div></div>
+          <div class="stat"><div class="v">132.7M</div><div class="k">scores per layer if every token saw every token: 11,520 (query tokens) × 11,520 (key tokens)</div></div>
+          <div class="stat"><div class="v c-wm">6.6M</div><div class="k">space layer: <span data-shape="20:frames,576:queries,576:keys"></span></div></div>
+          <div class="stat"><div class="v c-noise">121k</div><div class="k">time layer: <span data-shape="576:cells,210:causal frame pairs (20·21/2)"></span></div></div>
         </div>
         <p class="note" id="attnNote"></p>
       </div>
     </div>
   </div>
+
+  <h2>5 · Steering with the keyboard: AdaLN</h2>
   <div class="grid2">
-    <div class="callout"><b>Space layer = consistency</b> Every token sees every other token of the same frame, <i>across all four players' views</i>.
-      This is where "the ball in P1's view" can agree with "the ball in P3's view". The paper shows a P1-car token attending to that same car in
-      the other views (Fig. 17).</div>
-    <div class="callout noise"><b>Time layer = memory &amp; motion</b> Each token looks only at the <b>same grid cell in earlier frames</b> (causal: never the future).
-      This is how motion and persistence flow forward. It is also why context length limits memory: an off-screen car older than the window is
-      gone (Ch. 07).</div>
+    <div class="prose">
+      <p>Remember makemore's BatchNorm layer:</p>
+      <div class="mathbox">hpreact = bngain * (hpreact − mean) / std + bnbias</div>
+      <p><code>bngain</code> and <code>bnbias</code> were learned parameters, the same for every input. <b>LayerNorm</b> does the same normalise-then-scale-and-shift,
+        except it normalises each token over its own 4096 features instead of over the batch.</p>
+      <p><b>AdaLN</b> ("adaptive LayerNorm") has one twist: the gain and bias are <b>not fixed parameters</b>. A small network <i>computes</i> them from a
+        conditioning vector <b>c</b>, which summarises what the 4 players are pressing and how noisy the input currently is (τ from Ch. 02):</p>
+      <div class="mathbox">
+        c = emb(keys of P1..P4) + emb(τ)<br />
+        γ, β = Linear(c) &nbsp;&nbsp;<span class="muted"># "gain" and "bias", per block</span><br />
+        x̂ = (1 + γ) · LayerNorm(x) + β
+      </div>
+      <p>So pressing <span class="kbd">W</span> doesn't add a token. It changes how <b>every token in every block</b> gets scaled and shifted. That's how
+        a keypress reaches the whole picture.</p>
+    </div>
+    <div class="callout act" style="align-self:start"><b>Two details that matter for multiplayer</b>
+      <p style="margin:4px 0">① Each player's 9 keys go through their own small embedding, and the four results are concatenated in a fixed order (P1, P2, P3, P4).
+        That order matches the stacking order of the views. The <i>same</i> c is used for every token, so the model has to <b>learn</b> that P1's W moves P1's camera and
+        not the sky in P4's view.</p>
+      <p style="margin:4px 0">② A player's keys can be replaced by a learned <b>"absent"</b> vector. Then the model must guess what that player does, and that's the autopilot (Ch. 05).</p>
+    </div>
   </div>
-
-  <h2>3 · How keys steer every layer: AdaLN</h2>
-  <p class="prose">Actions are <i>not</i> tokens. Each player's 9 keys are embedded by a per-player network. The four embeddings are
-    <b>concatenated in a fixed player order</b> (the same order as the view tiling) and summed with the embedding of the noise level τ into
-    one conditioning vector <b>c</b>. From c, each block predicts a <b>scale γ</b> and <b>shift β</b>, and every token's normalised features are
-    modulated as <code>(1 + γ)·LN(x) + β</code>. Toggle keys below and watch c, γ, β and a token's features change.</p>
-
   <div class="demo" id="demoAda">
-    <div class="demo-head"><h3>Action conditioning, wired exactly like MIRA</h3><span class="badge viz">real mechanism · random (untrained) weights</span></div>
+    <div class="demo-head"><h3>Press keys, watch γ and β change</h3><span class="badge viz">real wiring · random (untrained) weights</span></div>
     <div class="kb" id="kb"></div>
     <div class="controls" style="margin-top:12px">
-      <label>flow time τ <input type="range" id="adaTau" min="0" max="1" step="0.01" value="0.5" /> <b class="mono" id="adaTauV">0.50</b></label>
+      <label>noise level τ <input type="range" id="adaTau" min="0" max="1" step="0.01" value="0.5" /> <b class="mono" id="adaTauV">0.50</b></label>
       <label>token <select id="tokSel"><option value="0">P1 view · ball</option><option value="1">P2 view · sky</option><option value="2">P3 view · car</option><option value="3">P4 view · HUD</option></select></label>
       <button id="randKeys">random keys</button>
     </div>
     <div class="flow">
-      <div class="stage"><h4><span class="c-act">emb(a¹:⁴)</span> + <span class="c-noise">emb(τ)</span> = <span class="c-wm">c</span></h4><canvas id="cvC" width="360" height="200"></canvas></div>
-      <div class="stage"><h4><span class="c-wm">γ(c)</span> scale &amp; <span class="c-wm">β(c)</span> shift</h4><canvas id="cvGB" width="360" height="200"></canvas></div>
-      <div class="stage"><h4>token: LN(x) → (1+γ)·LN(x)+β</h4><canvas id="cvX" width="360" height="200"></canvas></div>
+      <div class="stage"><h4><span class="c-act">emb(keys)</span> + <span class="c-noise">emb(τ)</span> = <span class="c-wm">c</span></h4><canvas id="cvC" width="360" height="200"></canvas></div>
+      <div class="stage"><h4><span class="c-wm">γ</span> (gain) and <span class="c-wm">β</span> (bias) from c</h4><canvas id="cvGB" width="360" height="200"></canvas></div>
+      <div class="stage"><h4>one token: LayerNorm(x) → (1+γ)·LN(x)+β</h4><canvas id="cvX" width="360" height="200"></canvas></div>
     </div>
-    <p class="note">Notice that <b>pressing P1's W changes γ and β for every token, including P4's HUD token</b>. The conditioning is broadcast to all
-      positions. Nothing tells the model which key belongs to which view: it has to <i>learn</i> that P1's keys move P1's camera and P1's car as seen by
-      others, and leave the sky alone. The "absent" checkbox swaps in the learned <b>absent token</b> used for action dropout (Ch. 05).
-      Actions are logged at 20 fps and latents run at 10 Hz, so a learned linear layer also pools the two action frames that fall inside each latent step.</p>
+    <p class="note">Only 32 of the 4096 features are drawn. Whichever token you pick, the same γ and β apply; change the keys and every token's output bars move.</p>
   </div>
 
-  <h2>4 · One block, and the whole stack</h2>
-  <div class="demo">
-    <div class="demo-head"><h3>AdaLN space-time block × 16</h3><span class="badge paper">Fig. 4 / Table 11</span></div>
-    <svg id="blockSvg" viewBox="0 0 1100 230" style="width:100%;height:auto"></svg>
+  <h2>6 · One block, then the whole model</h2>
+  <div class="prose">
+    <p>A <b>block</b> is three sub-layers. Each one <i>adds</i> its result to the token instead of replacing it: <code>x = x + f(x)</code>. This "residual" trick lets
+      gradients flow through 16 stacked blocks, the deep-network problem makemore part 3 fought with careful initialisation.</p>
   </div>
+  <div class="demo">
+    <div class="demo-head"><h3>One block (MIRA stacks 16)</h3><span class="badge paper">Fig. 4 / Table 11</span></div>
+    <svg id="blockSvg" viewBox="0 0 1100 250" style="width:100%;height:auto"></svg>
+  </div>
+  <h3>A full forward pass, with shapes</h3>
   <table class="t">
-    <tr><th>Model</th><th class="n">width</th><th class="n">layers</th><th class="n">heads (q/kv)</th><th>notes</th></tr>
-    <tr><td>Baseline ablation model</td><td class="n">2048</td><td class="n">16</td><td class="n">16 / 4</td><td>1B; temporal attention every 4 layers; 78-frame training context</td></tr>
-    <tr><td><b>Live-demo model</b></td><td class="n">4096</td><td class="n">16</td><td class="n">32 / 8</td><td>≈5B; 30k single-player + 100k multiplayer steps</td></tr>
+    <tr><th>step</th><th>shape</th><th>what happens</th></tr>
+    <tr><td>input latents (noisy newest frame + 19 past frames)</td><td><span data-shape="20:frames,36:rows,16:columns,32:channels"></span></td><td>4 players' grids already stacked into 36 rows</td></tr>
+    <tr><td>embed (like <code>C</code>)</td><td><span data-shape="20:frames,576:tokens,4096:features"></span></td><td>linear layer 32 → 4096 on every token</td></tr>
+    <tr><td>16 × block</td><td><span data-shape="20:frames,576:tokens,4096:features"></span></td><td>space attention, time attention, MLP, each steered by γ, β from the keys</td></tr>
+    <tr><td>output head</td><td><span data-shape="20:frames,36:rows,16:columns,32:channels"></span></td><td>linear 4096 → 32: the predicted velocity for every cell</td></tr>
+    <tr><td>split back into views</td><td><span data-shape="4:players,9:rows,16:columns,32:channels"></span> per frame</td><td>the newest frame's velocity is used to denoise it (Ch. 02)</td></tr>
   </table>
-  <p class="prose muted" style="margin-top:12px">Stabilisers used throughout: grouped-query attention (cheaper KV cache), QK-normalisation, a sigmoid gate on the attention output,
-    SwiGLU feed-forward, and learnable spatial and temporal <b>register tokens</b>, which give attention somewhere to dump global information.</p>
+
+  <h2>7 · Jargon decoder (optional)</h2>
+  <p class="prose">The paper lists several extra components. None of them change the ideas above. They make a 5-billion-parameter model train stably and run fast.</p>
+  <dl class="glossary prose">
+    <dt>Multi-head attention (32 heads)</dt><dd>Run 32 small attention lookups side by side, each with its own q/k/v layers, and concatenate the results. One head might track the ball while another tracks the clock.</dd>
+    <dt>GQA: grouped-query attention (32 query heads / 8 key-value heads)</dt><dd>Groups of 4 query heads share one key/value head. Fewer keys and values to store means a smaller cache and faster real-time generation (Ch. 06).</dd>
+    <dt>RoPE: rotary position embedding</dt><dd>Attention by itself doesn't know <i>where</i> a token is (makemore's MLP knew from the slot). RoPE rotates q and k by an angle that depends on
+      row, column and time, so the score depends on the <i>relative</i> offset. No weights are tied to a grid size, so the single-player model (9 rows) can be warm-started
+      into the 4-player model (36 rows) with the same weights.</dd>
+    <dt>QK-norm, sigmoid gate</dt><dd>Normalise q and k before the dot product, and let a learned 0–1 "valve" scale the attention output. Both stop activations from blowing up, the problem makemore's part 3 diagnosed with histograms.</dd>
+    <dt>SwiGLU</dt><dd>The per-token MLP, with a gated activation instead of tanh/ReLU. Same role as makemore's hidden layer.</dd>
+    <dt>Register tokens</dt><dd>A few extra learnable tokens that aren't image cells. Attention can use them as scratch space for global information.</dd>
+    <dt>KV cache</dt><dd>At generation time, the keys and values of past frames don't change, so they are stored and reused instead of recomputed (Ch. 06).</dd>
+  </dl>
+  <table class="t" style="margin-top:14px">
+    <tr><th>Model</th><th class="n">features per token</th><th class="n">blocks</th><th class="n">heads (q / kv)</th><th>notes</th></tr>
+    <tr><td>Baseline ablation model (~1B)</td><td class="n">2048</td><td class="n">16</td><td class="n">16 / 4</td><td>temporal attention every 4 blocks</td></tr>
+    <tr><td><b>Live-demo model (~5B)</b></td><td class="n">4096</td><td class="n">16</td><td class="n">32 / 8</td><td>30k single-player + 100k multiplayer training steps</td></tr>
+  </table>
 </main>
 <script type="module" src="/src/ch4.js"></script>
 </body>

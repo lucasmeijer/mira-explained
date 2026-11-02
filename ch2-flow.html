@@ -112,7 +112,7 @@
   <h2>Mapping the toy to MIRA</h2>
   <table class="t">
     <tr><th></th><th>This page</th><th>MIRA</th></tr>
-    <tr><td>One sample z</td><td>a 2-D point</td><td>the next latent frame for <b>all 4 players</b>: 4 × 9 × 16 × 32 = 18,432 numbers</td></tr>
+    <tr><td>One sample z</td><td>a 2-D point</td><td>the next latent frame for <b>all 4 players</b>: <span data-shape="4:players,9:rows,16:columns,32:channels"></span> = 18,432 numbers</td></tr>
     <tr><td>Network v<sub>θ</sub></td><td>4-layer MLP, ~38k params</td><td>16-layer space-time diffusion transformer, 5B params (Ch. 04)</td></tr>
     <tr><td>Conditioning</td><td>τ (and Δ)</td><td>τ (and Δ) + all four players' actions via AdaLN + past latents via causal temporal attention</td></tr>
     <tr><td>Noise level per frame</td><td>one τ</td><td>an <b>independent τ per frame</b> during training → diffusion forcing (Ch. 03)</td></tr>

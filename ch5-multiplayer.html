@@ -29,7 +29,7 @@
 
   <h2>The three multiplayer ingredients</h2>
   <div class="grid3">
-    <div class="callout lat"><b>1 · Tiled views</b> The four 9×16 latent grids are stacked into one 36×16 grid. Space attention spans all of them,
+    <div class="callout lat"><b>1 · Tiled views</b> The four <span data-shape="9:rows,16:columns"></span> latent grids are stacked into one <span data-shape="36:rows = 4 players × 9,16:columns"></span> grid. Space attention spans all of them,
       so the ball, the clock and a demolition are rendered once, consistently, from four cameras (Fig. 5, 6, 17).</div>
     <div class="callout act"><b>2 · Per-player actions</b> Each player's keys go through a per-player embedding. They are concatenated in the same fixed order as the
       tiles and broadcast to every token through AdaLN. The model must <i>learn</i> which keys affect which pixels.</div>

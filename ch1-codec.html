@@ -31,7 +31,7 @@
     <div class="kicker">Chapter 01 · Section 4.2 of the paper</div>
     <h1>The codec: the model works in <span class="c-enc">DINO</span> space, not pixels</h1>
     <p class="lede">MIRA's world model never touches a pixel. A <b>video representation codec</b> turns every
-      512×288 frame into a small grid of meaningful numbers. The world model learns to predict what those numbers
+      <span data-shape="512:px wide,288:px tall"></span> frame into a small grid of meaningful numbers. The world model learns to predict what those numbers
       do next. Then the codec turns the predicted numbers back into video. This chapter runs the codec's frozen encoder
       (a real DINOv3 network) <b>live in your browser</b>, so you can see what the world model actually "sees".</p>
   </section>
@@ -45,9 +45,9 @@
     <div class="demo-head"><h3>Codec anatomy</h3><span class="badge viz">diagram · shapes from the paper</span></div>
     <svg id="codecSvg" viewBox="0 0 1100 300" style="width:100%;height:auto"></svg>
     <div class="grid4" style="margin-top:10px">
-      <div class="stat"><div class="v">884,736</div><div class="k">numbers in 2 RGB frames (2×288×512×3)</div></div>
-      <div class="stat"><div class="v c-enc">2×576×1024</div><div class="k">DINOv3-L patch features (16×16 px patches)</div></div>
-      <div class="stat"><div class="v c-lat">4,608</div><div class="k">numbers in one latent frame (9×16×32)</div></div>
+      <div class="stat"><div class="v">884,736</div><div class="k">numbers in 2 RGB frames: <span data-shape="2:frames,288:px tall,512:px wide,3:RGB colours"></span></div></div>
+      <div class="stat"><div class="v c-enc">1,179,648</div><div class="k">DINOv3-L features: <span data-shape="2:frames,18:patch rows,32:patch columns,1024:features"></span> (one patch = 16×16 px)</div></div>
+      <div class="stat"><div class="v c-lat">4,608</div><div class="k">numbers in one latent frame: <span data-shape="9:rows,16:columns,32:channels"></span></div></div>
       <div class="stat"><div class="v c-wm">192×</div><div class="k">fewer values for the world model to predict</div></div>
     </div>
   </div>
@@ -95,17 +95,17 @@
   </div>
 
   <h2>Demo 2 · Squeeze it through the bottleneck</h2>
-  <p class="prose">DINOv3's grid is too big to predict 20 times a second. MIRA adds one <b>linear</b> layer, a 2×2×2
-    patchifier, that merges 2×2 neighbouring patches and 2 consecutive frames, and shrinks 1024 channels to <b>32</b>.
+  <p class="prose">DINOv3's grid is too big to predict 20 times a second. MIRA adds one <b>linear</b> layer, a <span data-shape="2:rows,2:columns,2:frames"></span>
+    patchifier, that merges 2 (rows) × 2 (columns) neighbouring patches and 2 consecutive frames, and shrinks 1024 channels to <b>32</b>.
     The result is one latent "cell" per 32×32 pixels, at 10 Hz. The paper also tried a <i>parameter-free</i> version: pooling plus a
     fixed PCA projection. That ablation (Table 4) scored nearly as well as the learned layer: gFID 11.7 vs 10.7.
     The demo below builds exactly that PCA + pooling bottleneck live on the features you just computed.</p>
 
   <div class="demo" id="demo2">
-    <div class="demo-head"><h3>PCA + 2×2 pooling bottleneck</h3><span class="badge real">real features · the paper's "PCA + pooling" ablation</span></div>
+    <div class="demo-head"><h3>PCA + 2 (rows) × 2 (columns) pooling bottleneck</h3><span class="badge real">real features · the paper's "PCA + pooling" ablation</span></div>
     <div class="controls">
       <label>latent channels <input type="range" id="chan" min="1" max="128" step="1" value="32" /> <b class="mono" id="chanV">32</b></label>
-      <label><input type="checkbox" id="pool" checked /> 2×2 spatial pooling (18×32 → 9×16 cells)</label>
+      <label><input type="checkbox" id="pool" checked /> 2 (rows) × 2 (columns) spatial pooling (<span data-shape="18:rows,32:columns"></span> → <span data-shape="9:rows,16:columns"></span> cells)</label>
       <div class="seg" id="latMode"><button data-m="pca" class="on">latent PCA→RGB</button><button data-m="sim">similarity (same click)</button></div>
     </div>
     <div class="grid4" style="margin-bottom:12px">
@@ -127,7 +127,7 @@
       <p>The <span class="chip dec">decoder</span> is the only part of the codec that has to deal with pixels. It is a 0.45B-parameter
         space-time ViT:</p>
       <ol style="padding-left:20px">
-        <li><b>Upsample first:</b> 9×16 → 18×32 tokens, so the attention runs at DINO's finer grid. The paper reports that this one step is
+        <li><b>Upsample first:</b> <span data-shape="9:rows,16:columns"></span> → <span data-shape="18:rows,32:columns"></span> tokens, so the attention runs at DINO's finer grid. The paper reports that this one step is
           "important for reconstruction quality" (Table 25).</li>
         <li><b>Attend</b>: full attention within a frame, <b>causal</b> across time (it only sees past latents), so it can stream.</li>
         <li><b>Temporal unpatchify</b>: each 10 Hz latent becomes <b>2 video frames</b>, 50 ms apart → 20 fps.</li>
@@ -161,7 +161,7 @@
   <table class="t">
     <tr><th>Part</th><th>Trained?</th><th>Role</th><th>Evidence in the paper</th></tr>
     <tr><td><span class="chip enc">DINOv3-L encoder</span></td><td>frozen</td><td>Supplies <b>meaning</b>: objects map to consistent vectors, so the latent space is smooth and easy to predict</td><td>From-scratch extractor: gFID 22.5 vs 10.7, 1.7× more drift</td></tr>
-    <tr><td><span class="chip lat">Linear bottleneck</span></td><td>trained (one layer)</td><td>Makes it <b>small</b>: 2×2 space, 2× time, 1024→32 channels. Linear so it compresses without distorting</td><td>Random/PCA projection almost as good; 10 Hz latent "is free"</td></tr>
+    <tr><td><span class="chip lat">Linear bottleneck</span></td><td>trained (one layer)</td><td>Makes it <b>small</b>: merges 2 (rows) × 2 (columns) × 2 (frames) neighbours and maps 1024 → 32 (channels). Linear so it compresses without distorting</td><td>Random/PCA projection almost as good; 10 Hz latent "is free"</td></tr>
     <tr><td><span class="chip dec">ViT decoder</span></td><td>trained</td><td>Makes it <b>visible</b>: paints 2 frames per latent; doesn't affect what the world model predicts</td><td>Quality saturates at the Large (0.3B) size</td></tr>
     <tr><td><span class="chip noise">Perceptual losses</span></td><td>–</td><td>Keep reconstructions sharp without a GAN</td><td>Removing both LPIPS and P-DINO collapses generation (gFID 26.8)</td></tr>
   </table>

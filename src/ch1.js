@@ -20,26 +20,27 @@ mountNav('ch1-codec');
   const ENC = '#2dd4bf', LAT = '#a78bfa', DEC = '#38bdf8', WM = '#fbbf24';
   svgEl('text', { x: 20, y: 22, fill: ENC, 'font-size': 12, 'font-weight': 700, 'letter-spacing': '0.1em' }, svg).textContent = 'ENCODER';
   svgEl('text', { x: 1090, y: 22, 'text-anchor': 'end', fill: DEC, 'font-size': 12, 'font-weight': 700, 'letter-spacing': '0.1em' }, svg).textContent = 'DECODER';
-  box(10, 110, 110, 70, '#93a0b4', '2 frames', '288×512×3\n@ 20 fps', 0.06);
-  arrow(120, 145, 150, 145);
-  box(150, 95, 140, 100, ENC, 'DINOv3-L/16', 'FROZEN · per frame\n18×32 patches ×1024\navg of layers 11–23', 0.12);
-  arrow(290, 145, 320, 145);
-  box(320, 105, 120, 80, LAT, 'Linear 2×2×2', 'TRAINED · 1 layer\n1024 → 32 ch', 0.12);
-  arrow(440, 145, 470, 145);
-  box(470, 100, 130, 90, LAT, 'latent z', '9×16×32 @ 10 Hz\n4,608 numbers', 0.28);
-  arrow(600, 145, 630, 145);
-  box(630, 105, 110, 80, DEC, 'Upsample', '2×2 in space\n→ 18×32 tokens', 0.1);
-  arrow(740, 145, 770, 145);
-  box(770, 95, 150, 100, DEC, 'Space-time ViT-XL', 'TRAINED · 0.45B\nfull attn in space\ncausal in time', 0.12);
-  arrow(920, 145, 950, 145);
-  box(950, 105, 140, 80, DEC, 'Temporal ×2', '1 latent → 2 frames\n50 ms apart', 0.1);
+  const B = (x, w, h, c, t, sub, f) => box(x, 150 - h / 2, w, h, c, t, sub, f);
+  B(8, 122, 104, '#93a0b4', '2 frames', '288 (px tall) ×\n512 (px wide) ×\n3 (RGB) @ 20 fps', 0.06);
+  arrow(130, 150, 150, 150);
+  B(150, 152, 118, ENC, 'DINOv3-L/16', 'FROZEN · per frame\n18 (rows) × 32 (cols)\n× 1024 (features)\navg of layers 11–23', 0.12);
+  arrow(302, 150, 322, 150);
+  B(322, 152, 104, LAT, 'Linear 2×2×2', 'merges 2 (rows) × 2 (cols)\n× 2 (frames);\n1024 → 32 (channels)', 0.12);
+  arrow(474, 150, 494, 150);
+  B(494, 142, 118, LAT, 'latent z', '9 (rows) × 16 (cols)\n× 32 (channels)\n@ 10 Hz\n= 4,608 numbers', 0.28);
+  arrow(636, 150, 656, 150);
+  B(656, 140, 90, DEC, 'Upsample', '9 (rows) × 16 (cols)\n→ 18 (rows) × 32 (cols)', 0.1);
+  arrow(796, 150, 816, 150);
+  B(816, 140, 104, DEC, 'Space-time ViT-XL', 'TRAINED · 0.45B\nfull attn in space\ncausal in time', 0.12);
+  arrow(956, 150, 974, 150);
+  B(974, 120, 90, DEC, 'Temporal ×2', '1 latent → 2 frames\n50 ms apart', 0.1);
   // world model hook
-  svgEl('path', { d: 'M535,100 C535,40 535,40 535,40', stroke: WM, 'stroke-width': 1.5, 'stroke-dasharray': '5 4', fill: 'none' }, svg);
-  box(420, 8, 230, 34, WM, 'World model predicts HERE', '', 0.15);
-  svgEl('text', { x: 535, y: 225, fill: '#93a0b4', 'font-size': 11.5, 'text-anchor': 'middle' }, svg).textContent = 'deterministic: no noise, no KL';
-  svgEl('text', { x: 845, y: 225, fill: '#93a0b4', 'font-size': 11.5, 'text-anchor': 'middle' }, svg).textContent = 'loss = L1 + λp·LPIPS + λd·‖DINO(x) − DINO(x̂)‖²';
-  svgEl('text', { x: 845, y: 242, fill: '#66728a', 'font-size': 11, 'text-anchor': 'middle' }, svg).textContent = 'λ’s rebalanced every step by gradient norm · no GAN';
-  svgEl('text', { x: 220, y: 225, fill: '#66728a', 'font-size': 11, 'text-anchor': 'middle' }, svg).textContent = 'mean of chosen layers + the deepest one';
+  svgEl('path', { d: 'M565,91 C565,42 565,42 565,42', stroke: WM, 'stroke-width': 1.5, 'stroke-dasharray': '5 4', fill: 'none' }, svg);
+  box(450, 8, 230, 34, WM, 'World model predicts HERE', '', 0.15);
+  svgEl('text', { x: 565, y: 232, fill: '#93a0b4', 'font-size': 11.5, 'text-anchor': 'middle' }, svg).textContent = 'deterministic: no noise, no KL';
+  svgEl('text', { x: 870, y: 232, fill: '#93a0b4', 'font-size': 11.5, 'text-anchor': 'middle' }, svg).textContent = 'loss = L1 + λp·LPIPS + λd·‖DINO(x) − DINO(x̂)‖²';
+  svgEl('text', { x: 870, y: 249, fill: '#66728a', 'font-size': 11, 'text-anchor': 'middle' }, svg).textContent = 'λ’s rebalanced every step by gradient norm · no GAN';
+  svgEl('text', { x: 226, y: 232, fill: '#66728a', 'font-size': 11, 'text-anchor': 'middle' }, svg).textContent = 'mean of chosen layers + the deepest one';
   svgEl('text', { x: 20, y: 285, fill: '#66728a', 'font-size': 11 }, svg).textContent = 'Each player view is encoded and decoded independently with the same codec (600M params total incl. the frozen 300M DINOv3-L).';
 })();
 
@@ -125,7 +126,7 @@ async function encodeCurrent() {
   S.cache.set(key, feats);
   if (SOURCES[S.src].frames[S.frame] !== key) return; // user moved on
   S.feats = feats; S.basis = null; S.pcs = null; S.latBasis = null;
-  $('#status').textContent = `encoded 4 views · ${(ms / 4).toFixed(0)} ms / view on ${dino.provider.toUpperCase()} · 576 patches × ${S.D} dims each`;
+  $('#status').textContent = `encoded 4 views · ${(ms / 4).toFixed(0)} ms / view on ${dino.provider.toUpperCase()} · 576 patches (18 rows × 32 columns) × ${S.D} features each`;
   if (S.mode === 'pixels') setMode('pca'); else draw();
   drawLatent();
 }
@@ -224,7 +225,7 @@ function pooled() {
 function drawLatent() {
   const cellsEl = $('#cells'), numsEl = $('#nums');
   const h = S.pool ? 9 : 18, w = S.pool ? 16 : 32;
-  cellsEl.textContent = `${h}×${w} = ${h * w}`;
+  cellsEl.innerHTML = `${h}<span class="muted" style="font-size:12px">(rows)</span>×${w}<span class="muted" style="font-size:12px">(cols)</span> = ${h * w}`;
   numsEl.textContent = (h * w * S.latChan).toLocaleString();
   $('#ratio').textContent = `${((288 * 512 * 3) / (h * w * S.latChan)).toFixed(0)}×`; $('#ratio2').textContent = `${((2 * 288 * 512 * 3) / (h * w * S.latChan)).toFixed(0)}×`;
   for (const g of latC) { g.fillStyle = '#0d1118'; g.fillRect(0, 0, 512, 288); g.fillStyle = '#66728a'; g.font = '14px sans-serif'; g.fillText(S.feats ? '' : 'encode a frame in Demo 1 first', 150, 148); }

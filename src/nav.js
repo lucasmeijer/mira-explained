@@ -28,6 +28,7 @@ export function mountNav(current) {
     pager.innerHTML = `${prev ? `<a href="./${prev.id}.html"><small>← ${prev.n}</small>${prev.title}</a>` : '<span></span>'}${next ? `<a href="./${next.id}.html" style="text-align:right"><small>${next.n} →</small>${next.title}</a>` : '<span></span>'}`;
     main.appendChild(pager);
   }
+  renderShapes();
   const act = nav.querySelector('.active');
   if (act) act.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
@@ -54,4 +55,13 @@ export function inferno(t) {
   t = Math.max(0, Math.min(1, t)) * (C.length - 1);
   const i = Math.min(C.length - 2, Math.floor(t)), f = t - i, a = C[i], b = C[i + 1];
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+// shape('4:players', '9:rows', ...) -> annotated HTML  "4 (players) × 9 (rows) …"
+export function shape(...dims) {
+  return `<span class="shape">${dims.map((d) => { const [n, l] = String(d).split(':'); return `<b>${n}</b>${l ? `<i>(${l})</i>` : ''}`; }).join('<span class="x">×</span>')}</span>`;
+}
+// Auto-render <span data-shape="4:players,9:rows"></span> placeholders
+export function renderShapes(root = document) {
+  root.querySelectorAll('[data-shape]').forEach((el) => (el.innerHTML = shape(...el.dataset.shape.split(','))));
 }

@@ -128,3 +128,9 @@ figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .tldr { display: grid; gap: 8px; margin: 18px 0; }
 .tldr div { display: flex; gap: 10px; align-items: flex-start; }
 .tldr div::before { content: '→'; color: var(--wm); font-weight: 700; }
+
+/* annotated shapes: 4 (players) × 9 (rows) … */
+.shape { font-family: var(--mono); font-size: 0.95em; white-space: normal; }
+.shape b { font-weight: 700; }
+.shape i { font-style: normal; color: var(--muted); font-family: var(--sans); font-size: 0.82em; margin: 0 1px; }
+.shape .x { color: var(--dim); margin: 0 3px; }

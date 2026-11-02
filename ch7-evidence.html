@@ -110,7 +110,7 @@
   <table class="t">
     <tr><th>Component</th><th>Job</th><th>If you remove or weaken it…</th><th>Ch.</th></tr>
     <tr><td><span class="chip enc">Frozen DINOv3-L</span></td><td>meaningful, smooth latent space</td><td>gFID 10.7 → 22.5, 1.7× more drift, no recovery from OOD</td><td>01</td></tr>
-    <tr><td><span class="chip lat">Linear bottleneck</span></td><td>2×2 space, 2× time, 1024→32 channels: real-time-sized latent</td><td>pixel space: gFID ≈ 81–105, ARR ≈ 0.5–0.6</td><td>01</td></tr>
+    <tr><td><span class="chip lat">Linear bottleneck</span></td><td>merges 2 (rows) × 2 (columns) × 2 (frames) and maps 1024 → 32 (channels): a real-time-sized latent</td><td>pixel space: gFID ≈ 81–105, ARR ≈ 0.5–0.6</td><td>01</td></tr>
     <tr><td><span class="chip dec">ViT decoder</span></td><td>paint 2 frames per latent, causally</td><td>Base-size decoder: blurrier, slightly worse generation</td><td>01</td></tr>
     <tr><td><span class="chip noise">Flow matching</span></td><td>sample one sharp future</td><td>regression would blur the possible futures together</td><td>02</td></tr>
     <tr><td><span class="chip noise">Few-step distillation</span></td><td>1–2 passes per latent</td><td>~10 passes: far below 20 fps</td><td>02/06</td></tr>
