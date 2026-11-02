@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>08 · Training & compute — MIRA explained</title>
+<style>
+  .stages { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  @media (max-width: 1000px) { .stages { grid-template-columns: 1fr 1fr; } }
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; position: relative; }
+  .stage .n { font: 700 11px var(--mono); color: var(--muted); }
+  .stage h4 { margin: 4px 0 6px; font-size: 14.5px; }
+  .stage p { margin: 0; font-size: 13px; color: var(--muted); }
+  .stage .hw { margin-top: 8px; font: 600 11.5px var(--mono); color: var(--text); }
+  .pipe svg { width: 100%; height: auto; display: block; }
+  .dec { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 900px) { .dec { grid-template-columns: 1fr; } }
+  .dec .col { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .dec .col h4 { margin: 0 0 6px; font-size: 13px; }
+  .dec canvas { width: 100%; display: block; border-radius: 6px; }
+  .dec .lbl { font: 600 11px var(--mono); color: var(--muted); margin: 6px 0 2px; }
+  .dec .err { font: 700 13px var(--mono); }
+  .loopcode { font-family: var(--mono); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; line-height: 1.75; white-space: pre; overflow-x: auto; }
+  .loopcode .c { color: var(--dim); }
+  .gpus { display: grid; grid-template-columns: repeat(16, 1fr); gap: 4px; margin: 10px 0; }
+  .gpus div { aspect-ratio: 1; border-radius: 4px; background: rgba(251,191,36,.18); border: 1px solid rgba(251,191,36,.5); font: 600 9px var(--mono); display: grid; place-items: center; color: var(--wm); }
+  .wmtrain { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .wmtrain { grid-template-columns: 1fr; } }
+  .wmtrain canvas { width: 100%; display: block; border-radius: 10px; border: 1px solid var(--line); }
+  td.est { color: var(--wm); }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="kicker">Chapter 08 · Sections 3, 4 and Appendix A of the paper</div>
+    <h1>How MIRA is trained, step by step, and <span class="c-wm">what it costs</span></h1>
+    <p class="lede">The earlier chapters explain what each part <i>does</i>. This one explains how each part <i>learns</i>: in what order, from what data,
+      with which loss, and on how many GPUs. The key fact: training happens in <b>separate stages</b>, and each stage freezes everything it doesn't train.
+      The decoder never sees the world model, and the world model never needs the decoder.</p>
+  </section>
+
+  <h2>The recipe, in order</h2>
+  <div class="stages">
+    <div class="stage"><div class="n">STAGE 0</div><h4>Collect data</h4><p>Bots play 2v2 Rocket League on 120 virtual machines. Each machine records its player's video, keys and physics.</p><div class="hw">120 VMs · 26 days<br />→ 10,000 clean match-hours</div></div>
+    <div class="stage"><div class="n">(given)</div><h4 class="c-enc">DINOv3-L</h4><p>Trained by Meta on about 1.7B images, long before MIRA. MIRA downloads it and <b>never changes it</b>.</p><div class="hw">frozen · 0 GPU-hours for MIRA</div></div>
+    <div class="stage"><div class="n">STAGE 1</div><h4 class="c-dec">Train the codec</h4><p>Bottleneck + decoder learn to reconstruct video through DINO. No world model is involved.</p><div class="hw">32× B200 · 400k steps</div></div>
+    <div class="stage"><div class="n">STAGE 2</div><h4 class="c-wm">World model, 1 player</h4><p>Codec frozen. Learn to denoise the next latent of <i>one</i> player's view from its past + that player's keys.</p><div class="hw">30k steps</div></div>
+    <div class="stage"><div class="n">STAGE 3</div><h4 class="c-wm">World model, 4 players</h4><p>Same weights, now on all 4 views tiled together with all 4 key streams. Few-step distillation is mixed in.</p><div class="hw">100k steps</div></div>
+  </div>
+  <p class="prose muted" style="margin-top:10px">Small <b>probes</b> are trained afterwards, only to measure the model (action probe, game-state probe; Ch. 07). They don't change MIRA.</p>
+
+  <h2>First: what "a training step" means at this scale</h2>
+  <div class="grid2">
+    <div class="prose">
+      <p>It's the same loop you wrote in makemore. Only the sizes change:</p>
+      <div class="loopcode"><span class="c"># makemore</span>                   <span class="c"># MIRA (each stage)</span>
+Xb, Yb = random batch         clips = random batch of 4-s clips
+logits = model(Xb)            pred   = model(clips)        <span class="c"># forward</span>
+loss = F.cross_entropy(...)   loss   = (pred - target)²…   <span class="c"># how wrong?</span>
+loss.backward()               loss.backward()              <span class="c"># gradients</span>
+p.data += -lr * p.grad        optimizer.step()  (AdamW)    <span class="c"># update</span></div>
+      <p>Two things are new:</p>
+      <ul>
+        <li><b>Frozen parts</b>: some modules run in the forward pass but get no gradient update (<code>requires_grad = False</code>). Gradients stop there.</li>
+        <li><b>Many GPUs</b> ("DDP", data-parallel): each GPU holds a full copy of the model and processes its own slice of the batch. After <code>backward()</code> the GPUs
+          <i>average their gradients</i>, so every copy takes the identical update. 32 GPUs ≈ a 32× bigger batch in the same time.</li>
+      </ul>
+    </div>
+    <div class="demo" style="margin:0">
+      <div class="demo-head"><h3>Data-parallel training, one step</h3><span class="badge viz">schematic</span></div>
+      <div class="gpus" id="gpus"></div>
+      <p class="note" id="gpuNote">Each square is one GPU with a full copy of the model. Click ▶ to run one step.</p>
+      <button id="gpuStep" class="primary">▶ one step</button>
+    </div>
+  </div>
+
+  <h2>Stage 1 · Training the codec (bottleneck + decoder)</h2>
+  <div class="callout dec"><b>Your mental model, checked</b>
+    "Take an input image, run it through DINO, run it through the compressor, run the decoder, and compare to the original. No world model needed." That is <b>correct</b>,
+    with three refinements:
+    <ol style="margin:6px 0 0; padding-left:20px">
+      <li>The <b>compressor (bottleneck) is trained too</b>, jointly with the decoder. Only DINOv3 is frozen.</li>
+      <li>It trains on <b>video clips</b> (40 frames), not single images. The bottleneck merges 2 consecutive frames into one latent, and the decoder is causal in time, so it needs sequences.</li>
+      <li>"Visual fidelity" is <b>three losses</b>: L1 (pixel difference), LPIPS (looks the same to a perception network), and P-DINO (re-encode the output with DINO and compare features to the original's). The weights are auto-balanced every step. There is no GAN.</li>
+    </ol>
+    It trains on single-player clips: every player view is encoded and decoded on its own.
+  </div>
+  <div class="demo pipe">
+    <div class="demo-head"><h3>One codec training step</h3><span class="badge viz">what gets gradients</span>
+      <div style="margin-left:auto;display:flex;gap:8px"><button id="cFwd">▶ forward</button><button id="cBwd">◀ backward</button></div></div>
+    <svg id="svgCodec" viewBox="0 0 1100 260"></svg>
+  </div>
+
+  <h3>Train a (tiny) decoder yourself</h3>
+  <p class="prose">This is a real decoder trained live in your browser, using the exact recipe above minus the perceptual losses. The input latents were made with the
+    same frozen DINOv3-S/16 + PCA bottleneck as Ch. 01, precomputed so you don't wait two minutes for encoding. Each latent cell is
+    <span data-shape="32:channels"></span>, and the decoder sees a cell plus its 8 neighbours (<span data-shape="3:rows,3:columns,32:channels"></span>) and must paint that
+    cell's <span data-shape="16:px tall,16:px wide,3:RGB"></span> patch. It trains on 6 frames of the stadium arena. Then we test it on 2 <b>unseen</b> stadium frames
+    and on the <b>desert arena</b>, a different look it never saw. That's your "would it work on another game?" question in miniature.</p>
+  <div class="demo" id="demoDec">
+    <div class="demo-head"><h3>Decoder: 32 numbers per cell → pixels</h3><span class="badge real">real training in your browser</span></div>
+    <div class="controls"><button class="primary" id="decTrain">▶ Train</button><button id="decReset">Reset</button><span class="tag" id="decInfo">step 0</span>
+      <span class="tag muted">MLP <span data-shape="288:inputs (3×3 cells × 32)"></span> → 256 → 768 (16×16×3 px) · ~270k params · MSE loss</span></div>
+    <div class="dec">
+      <div class="col"><h4>training frames <span class="tag">(stadium)</span></h4><div class="lbl">original</div><canvas id="dA0" width="256" height="144"></canvas><div class="lbl">decoded from latent</div><canvas id="dA1" width="256" height="144"></canvas><div class="lbl">error</div><div class="err" id="eA">–</div></div>
+      <div class="col"><h4>unseen frames, same arena</h4><div class="lbl">original</div><canvas id="dB0" width="256" height="144"></canvas><div class="lbl">decoded from latent</div><canvas id="dB1" width="256" height="144"></canvas><div class="lbl">error</div><div class="err" id="eB">–</div></div>
+      <div class="col"><h4>unseen arena (desert) <span class="tag">≈ "another game"</span></h4><div class="lbl">original</div><canvas id="dC0" width="256" height="144"></canvas><div class="lbl">decoded from latent</div><canvas id="dC1" width="256" height="144"></canvas><div class="lbl">error</div><div class="err" id="eC">–</div></div>
+    </div>
+    <div class="controls"><button id="decNext">next example ↻</button></div>
+    <div id="decLoss" style="max-width:560px"></div>
+    <p class="note">Watch the three errors. On training frames the error keeps falling. On unseen stadium frames it falls too, though less: the decoder <b>generalises within its world</b>.
+      On the desert arena it stays clearly worse, and the colours come out wrong: the decoder paints with the palette it learned. The latent says <i>what</i> is where, and the decoder supplies <i>how it looks</i>.
+      The images are blurry because the demo only uses an MSE loss. MIRA's LPIPS and P-DINO losses are exactly what fixes that blur.</p>
+  </div>
+
+  <h2>Stages 2–3 · Training the world model</h2>
+  <div class="prose">
+    <p>The codec is now <b>frozen</b>. The world model only ever sees <b>latents</b>: it reads latents and is graded on latents. The decoder isn't used at all during
+      world-model training. It is only switched on to <i>look</i> at results and to compute evaluation metrics. One training step:</p>
+    <ol>
+      <li><b>Sample clips.</b> A 4-second chunk: 80 video frames per player plus the 9-key state per frame.</li>
+      <li><b>Encode with the frozen codec encoder.</b> 80 frames → 40 latent frames per player. Stack the 4 players: <span data-shape="40:frames,36:rows = 4×9,16:columns,32:channels"></span>.
+        This is the clean target, z₁.</li>
+      <li><b>Corrupt it (diffusion forcing).</b> Draw a random noise level τ <i>independently for every one of the 40 frames</i> and mix in Gaussian noise z₀:
+        z<sub>τ</sub> = τ·z₁ + (1−τ)·z₀.</li>
+      <li><b>Prepare the keys.</b> Embed each player's keys. With some probability, swap a player's keys for the "absent" token (action dropout).</li>
+      <li><b>Forward.</b> The transformer (causal in time) predicts a velocity for every token of every frame.</li>
+      <li><b>Loss.</b> Mean squared error between predicted velocity and the true direction (z₁ − z₀), averaged over <i>all</i> 40 frames. Each frame is a target and also context for later frames.
+        On a fraction of steps, add the self-distillation loss (one big step = two half steps, Ch. 02).</li>
+      <li><b>Backward + AdamW update</b> (learning rate 1·10⁻⁴), only for the world model's weights. Keep a slow-moving average of the weights (EMA) for the final model.</li>
+    </ol>
+    <p>Stage 2 does all of this with <b>one player's</b> view (a 9-row grid, one key stream) for 30k steps. Stage 3 continues from those exact weights with <b>all four</b> views and key streams for 100k steps.
+      This warm start is needed: training multiplayer from scratch collapsed at the 1B budget (Ch. 05).</p>
+  </div>
+  <div class="demo pipe">
+    <div class="demo-head"><h3>One world-model training step</h3><span class="badge viz">what gets gradients</span>
+      <div style="margin-left:auto;display:flex;gap:8px"><button id="wFwd">▶ forward</button><button id="wBwd">◀ backward</button></div></div>
+    <svg id="svgWM" viewBox="0 0 1100 300"></svg>
+  </div>
+
+  <h3>Watch a world model learn (miniature)</h3>
+  <div class="demo" id="demoWM">
+    <div class="demo-head"><h3>Training the Rocket Pong world model from scratch</h3><span class="badge real">real training · Web Worker</span></div>
+    <div class="controls"><button class="primary" id="wmTrain">▶ Train from scratch (~2–4 min)</button><span class="tag" id="wmInfo">not started</span></div>
+    <div class="wmtrain">
+      <div><canvas id="wmCv" width="520" height="330"></canvas>
+        <p class="note">Every few hundred steps the current weights roll out 6 s from the same real start, given the real keys. <span style="color:#e6ebf2">White</span> = what the engine did, <span class="c-wm">amber</span> = the model's imagination. Early on the amber path is nonsense, and later it follows the physics.</p></div>
+      <div><div id="wmLoss"></div>
+        <p class="note">Same loop as MIRA's stages 2–3, scaled down. The data is 300 bot matches. Each step takes 128 random 4-state context windows, independently noised per frame (diffusion forcing), with 20% action dropout, MSE loss and Adam.
+          The model has about 89k parameters. MIRA's world model is about 56,000× bigger.</p></div>
+    </div>
+  </div>
+
+  <h2>What it costs: compute for every trained part</h2>
+  <p class="prose">The <b>hardware and step counts come from the paper</b> (Appendix A). The paper doesn't report total GPU-hours, so the amber column is <b>my back-of-envelope
+    estimate</b> (method below). Treat it as "the right order of magnitude", not a quote.</p>
+  <table class="t">
+    <tr><th>Part</th><th>Trained by MIRA?</th><th>Hardware (paper)</th><th>Schedule (paper)</th><th>Rough compute (my estimate)</th></tr>
+    <tr><td>Data collection</td><td>–</td><td>120 concurrent VMs running the game + Nexto bot</td><td>~26 days</td><td class="est">≈ 75,000 VM-hours</td></tr>
+    <tr><td><span class="chip enc">DINOv3-L encoder</span></td><td>No (frozen)</td><td>trained by Meta</td><td>–</td><td class="est">0 for MIRA</td></tr>
+    <tr><td><span class="chip dec">Codec: bottleneck + decoder</span> (live demo)</td><td>Yes</td><td>32× Nvidia B200 (4 nodes)</td><td>400k steps × 32 clips × 40 frames</td><td class="est">~200–500 B200-hours (≈ 6–15 h wall-clock)</td></tr>
+    <tr><td><span class="chip wm">World model 5B</span>, single-player stage</td><td>Yes</td><td>not stated (batch 1 per GPU)</td><td>30k steps</td><td class="est" rowspan="2">~700–1,500 B200-hours total (≈ 1–2 days on 32 B200), assuming 32 GPUs like the baseline</td></tr>
+    <tr><td><span class="chip wm">World model 5B</span>, multiplayer stage</td><td>Yes</td><td>not stated</td><td>100k steps</td></tr>
+    <tr><td>Ablation codecs (each)</td><td>Yes</td><td>8× H100 (1 node)</td><td>125k–250k steps</td><td class="est">~100 H100-hours each</td></tr>
+    <tr><td>Ablation world models, 1B (each)</td><td>Yes</td><td>16× H100 (1 player) / 32× H100 (4 players)</td><td>100k–150k steps</td><td class="est">~50–200 H100-hours each</td></tr>
+    <tr><td>Probes (action, game-state)</td><td>Yes, small</td><td>not stated</td><td>small heads on frozen features</td><td class="est">negligible</td></tr>
+    <tr><td><b>Running it</b> (inference)</td><td>–</td><td><b>1× B200 per 4-player match</b></td><td>~70 ms per step → 20 fps</td><td class="est">1 GPU per live game</td></tr>
+  </table>
+  <div class="grid2" style="margin-top:14px">
+    <div class="callout"><b>The big picture</b>
+      The final model is surprisingly cheap: roughly one to two days on one rack of 32 top-end GPUs for the world model, and less for the codec.
+      At typical cloud prices (a few dollars per B200-hour) that's thousands to low tens of thousands of dollars. The hidden cost is everything around it:
+      26 days of data collection and the dozens of ablation and scaling runs behind the paper's tables, each roughly 50–200 GPU-hours. Research costs many times more than the final run.</div>
+    <details class="demo" style="margin:0"><summary class="tag" style="cursor:pointer">How I estimated (click)</summary>
+      <p class="note">Rule of thumb: training FLOPs ≈ 6 × parameters × tokens processed (2 for the forward pass, 4 for the backward). Frozen parts cost only the forward 2×.</p>
+      <p class="note"><b>World model, multiplayer:</b> one 4-s clip = 40 latent frames × 576 tokens = 23,040 tokens. With an assumed 32 clips per step: 6 × 5·10⁹ × 23,040 × 32 × 100k ≈ 2.2·10²¹ FLOPs. Single-player stage
+        (144 tokens per frame, 30k steps): ≈ 0.2·10²¹. A B200 does ~2.2·10¹⁵ dense BF16 FLOP/s. At a realistic 30–40% utilisation that is ~0.7–0.9·10¹⁵/s →
+        ≈ 750–1,000 GPU-hours. Range widened for attention overhead and the distillation passes.</p>
+      <p class="note"><b>Codec:</b> decoder 0.45B params × 32 clips × 20 latent frames × 576 tokens (6×) + frozen DINOv3-L forward on 1,280 frames (2×) + P-DINO network ≈ 1.5·10¹⁵ FLOPs per step ×
+        400k steps ≈ 6·10²⁰ → ~200 GPU-hours at 40% utilisation. Video decoding and data loading probably make it slower in practice.</p>
+      <p class="note"><b>VM-hours:</b> 120 VMs × 26 days × 24 h ≈ 75k (minus downtime).</p>
+    </details>
+  </div>
+
+  <h2>Scale, side by side</h2>
+  <table class="t">
+    <tr><th></th><th>Toys in this series (your browser)</th><th>MIRA</th></tr>
+    <tr><td>World-model parameters</td><td class="n">~89 thousand</td><td class="n">~5 billion</td></tr>
+    <tr><td>Training data</td><td>300–600 scripted matches (generated in seconds)</td><td>10,000 match-hours of bot play (26 days of collection)</td></tr>
+    <tr><td>Hardware</td><td>one CPU thread</td><td>32 × B200 for training, 1 × B200 to play</td></tr>
+    <tr><td>Training time</td><td>2–5 minutes</td><td>~1–2 days (final run), weeks including ablations</td></tr>
+  </table>
+</main>
+<script type="module" src="/src/ch8.js"></script>
+</body>
+</html>

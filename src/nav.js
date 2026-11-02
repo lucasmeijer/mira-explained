@@ -9,6 +9,7 @@ export const CHAPTERS = [
   { id: 'ch5-multiplayer', n: '05', title: 'Four players, one world', short: 'Multiplayer' },
   { id: 'ch6-realtime', n: '06', title: 'Streaming at 20 fps', short: 'Real-time' },
   { id: 'ch7-evidence', n: '07', title: 'How we know it works (and where it breaks)', short: 'Evidence' },
+  { id: 'ch8-training', n: '08', title: 'How it’s trained, and what it costs', short: 'Training & compute' },
 ];
 
 export function mountNav(current) {

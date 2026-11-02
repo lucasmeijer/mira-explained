@@ -37,7 +37,7 @@ export function lineChart(el, { title, series, xlabel = '', ylabel = '', logx = 
   if (!all.length) all = [[xmin ?? 0, ymin ?? 0], [xmax ?? 1, ymax ?? 1]];
   const fx = logx ? Math.log10 : (v) => v, fy = logy ? Math.log10 : (v) => v;
   const x0 = fx(xmin ?? Math.min(...all.map((p) => p[0]))), x1 = fx(xmax ?? Math.max(...all.map((p) => p[0])));
-  const y0 = fy(ymin ?? Math.min(0, ...all.map((p) => p[1]))), y1 = fy(ymax ?? Math.max(...all.map((p) => p[1])) * 1.05);
+  const y0 = fy(ymin ?? (logy ? Math.min(...all.map((p) => p[1]).filter((v) => v > 0)) * 0.9 : Math.min(0, ...all.map((p) => p[1])))), y1 = fy(ymax ?? Math.max(...all.map((p) => p[1])) * 1.05);
   const X = (v) => L + ((fx(v) - x0) / (x1 - x0 || 1)) * (width - L - R);
   const Y = (v) => height - B - ((fy(Math.max(v, logy ? 1e-9 : -Infinity)) - y0) / (y1 - y0 || 1)) * (height - T - B);
   const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, style: 'width:100%;height:auto' });
@@ -47,7 +47,7 @@ export function lineChart(el, { title, series, xlabel = '', ylabel = '', logx = 
     const yv = y0 + ((y1 - y0) * i) / 4, yy = height - B - ((height - T - B) * i) / 4;
     svgEl('line', { x1: L, x2: width - R, y1: yy, y2: yy, stroke: '#263041', 'stroke-width': 1 }, svg);
     const lab = logy ? Math.pow(10, yv) : yv;
-    svgEl('text', { x: L - 6, y: yy + 4, fill: '#66728a', 'font-size': 10.5, 'text-anchor': 'end' }, svg).textContent = Math.abs(lab) >= 100 ? lab.toFixed(0) : Math.abs(lab) >= 10 ? lab.toFixed(1) : lab.toFixed(2);
+    svgEl('text', { x: L - 6, y: yy + 4, fill: '#66728a', 'font-size': 10.5, 'text-anchor': 'end' }, svg).textContent = Math.abs(lab) >= 100 ? lab.toFixed(0) : Math.abs(lab) >= 10 ? lab.toFixed(1) : Math.abs(lab) >= 0.1 || lab === 0 ? lab.toFixed(2) : lab.toPrecision(2);
   }
   const xt = logx ? [1, 2, 4, 10, 30, 60, 120, 300, 1000].filter((v) => fx(v) >= x0 - 1e-9 && fx(v) <= x1 + 1e-9) : Array.from({ length: 5 }, (_, i) => (xmin ?? Math.min(...all.map((p) => p[0]))) + (((xmax ?? Math.max(...all.map((p) => p[0]))) - (xmin ?? Math.min(...all.map((p) => p[0])))) * i) / 4);
   xt.forEach((v) => svgEl('text', { x: X(v), y: height - B + 15, fill: '#66728a', 'font-size': 10.5, 'text-anchor': 'middle' }, svg).textContent = Math.abs(v) >= 10 ? Math.round(v) : +v.toFixed(2));

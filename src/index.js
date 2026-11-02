@@ -118,6 +118,7 @@ const DESC = {
   'ch4-transformer': ['Built up from makemore: tokens in a 36 (rows) × 16 (columns) × 20 (frames) grid, attention worked out by hand, space vs. time attention, and how a keypress reaches every token through AdaLN.', ['real', 'viz', 'paper']],
   'ch5-multiplayer': ['Play inside a learned world model, hand players to autopilot (action dropout), and probe whether the model knows whose key moves which car.', ['toy', 'real']],
   'ch6-realtime': ['The rolling KV-cache window and a working simulator of the 20 fps serving loop. Break distillation or the cache and watch the stutter.', ['viz', 'toy']],
+  'ch8-training': ['The training recipe stage by stage (what is frozen, what learns, which loss), a decoder you train yourself, a world model learning live, and the GPU budget for every part.', ['real', 'viz', 'paper']],
   'ch7-evidence': ['FID, ARR, physics probes and human Elo. Run a mini ARR study, then trace every failure mode back to the component that causes it.', ['real', 'paper']],
 };
 $('#chapters').innerHTML = CHAPTERS.filter((c) => c.id !== 'index').map((c) => `<a href="./${c.id}.html"><div class="n">CHAPTER ${c.n}</div><h3>${c.title}</h3><p>${DESC[c.id][0]}</p><div class="badges">${DESC[c.id][1].map((b) => `<span class="badge ${b}">${b}</span>`).join('')}</div></a>`).join('');
