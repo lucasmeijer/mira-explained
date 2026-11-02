@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>04 · Inside the transformer — MIRA explained</title>
+<style>
+  .tok { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .tok { grid-template-columns: 1fr; } }
+  .tok canvas { width: 100%; height: auto; display: block; border-radius: 8px; }
+  .kb { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 900px) { .kb { grid-template-columns: 1fr 1fr; } }
+  .kb .pl { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .kb .pl h4 { margin: 0 0 6px; font-size: 12.5px; }
+  .kb .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .kb .keys button { padding: 4px 0; font: 600 11px var(--mono); }
+  .kb .keys button.down { background: var(--act); color: var(--bg); border-color: var(--act); }
+  .kb .absent { margin-top: 6px; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .bars canvas { width: 100%; height: auto; display: block; }
+  .flow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .flow { grid-template-columns: 1fr; } }
+  .flow .stage { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .flow .stage h4 { margin: 0 0 4px; font-size: 13px; }
+  .flow .stage canvas { width: 100%; height: auto; display: block; }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="kicker">Chapter 04 · Sections 4.4–4.5 of the paper</div>
+    <h1>Inside the <span class="c-wm">transformer</span>: tokens, space-time attention and AdaLN</h1>
+    <p class="lede">The world model is a 5B-parameter <b>diffusion transformer</b>. Each forward pass takes the noisy next latent plus the past
+      latents, the players' keys and the noise level τ, and outputs the flow velocity from Chapter 02. This chapter opens it up. You'll see how a
+      latent becomes tokens, how attention is split into "space" and "time" to make it affordable, and how keyboard presses steer
+      every layer.</p>
+  </section>
+
+  <h2>1 · From latents to tokens</h2>
+  <div class="grid2">
+    <div class="prose">
+      <p>Each latent cell (32 numbers, covering 32×32 pixels) is linearly embedded into one token. <b>Patch size is 1</b>, so
+        one cell is one token. The four players' 9×16 grids are <b>stacked along the height</b> into a single 36×16 grid. That gives
+        576 tokens per latent frame, and the context window holds 20 frames (2 s at 10 Hz).</p>
+      <p>Positions are encoded with <b>factorised RoPE</b>: 2-D rotary embeddings across the grid and a separate temporal rotary
+        embedding indexed <i>in seconds</i>. Rotary embeddings encode only <i>relative</i> offsets, so no weights are tied to a grid size. That
+        is why a single-player model (9×16 grid) can be warm-started into the 4-player model (36×16 grid) with the exact same weights.</p>
+    </div>
+    <div class="grid2" style="gap:10px">
+      <div class="stat"><div class="v c-lat">32</div><div class="k">channels per latent cell</div></div>
+      <div class="stat"><div class="v c-wm">4096</div><div class="k">token width in the 5B model</div></div>
+      <div class="stat"><div class="v">36×16 = 576</div><div class="k">tokens per frame (4 tiled views)</div></div>
+      <div class="stat"><div class="v">× 20</div><div class="k">frames of context at inference</div></div>
+      <div class="stat"><div class="v">11,520</div><div class="k">tokens in the context window</div></div>
+      <div class="stat"><div class="v">16 layers</div><div class="k">32 query heads / 8 KV heads (GQA)</div></div>
+    </div>
+  </div>
+
+  <h2>2 · Who attends to whom</h2>
+  <div class="demo" id="demoAttn">
+    <div class="demo-head"><h3>Factorised space-time attention</h3><span class="badge viz">exact token layout · real MIRA frames underneath</span></div>
+    <div class="controls">
+      <div class="seg" id="attnMode"><button data-m="space" class="on">space layer</button><button data-m="time">time layer</button><button data-m="full">naive full attention</button></div>
+      <span class="tag">hover / tap a token in the big frame (it's frame t, the newest one)</span>
+    </div>
+    <div class="tok">
+      <div><canvas id="cvFrame" width="300" height="690"></canvas></div>
+      <div>
+        <canvas id="cvStrip" width="860" height="420"></canvas>
+        <div class="grid3" style="margin-top:12px">
+          <div class="stat"><div class="v" id="pairsFull">132.7M</div><div class="k">query-key pairs, naive full attention over 11,520 tokens</div></div>
+          <div class="stat"><div class="v c-wm" id="pairsSpace">6.6M</div><div class="k">space layers: 20 frames × 576²</div></div>
+          <div class="stat"><div class="v c-noise" id="pairsTime">121k</div><div class="k">time layers: 576 positions × causal 20×21/2</div></div>
+        </div>
+        <p class="note" id="attnNote"></p>
+      </div>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="callout"><b>Space layer = consistency</b> Every token sees every other token of the same frame, <i>across all four players' views</i>.
+      This is where "the ball in P1's view" can agree with "the ball in P3's view". The paper shows a P1-car token attending to that same car in
+      the other views (Fig. 17).</div>
+    <div class="callout noise"><b>Time layer = memory &amp; motion</b> Each token looks only at the <b>same grid cell in earlier frames</b> (causal: never the future).
+      This is how motion and persistence flow forward. It is also why context length limits memory: an off-screen car older than the window is
+      gone (Ch. 07).</div>
+  </div>
+
+  <h2>3 · How keys steer every layer: AdaLN</h2>
+  <p class="prose">Actions are <i>not</i> tokens. Each player's 9 keys are embedded by a per-player network. The four embeddings are
+    <b>concatenated in a fixed player order</b> (the same order as the view tiling) and summed with the embedding of the noise level τ into
+    one conditioning vector <b>c</b>. From c, each block predicts a <b>scale γ</b> and <b>shift β</b>, and every token's normalised features are
+    modulated as <code>(1 + γ)·LN(x) + β</code>. Toggle keys below and watch c, γ, β and a token's features change.</p>
+
+  <div class="demo" id="demoAda">
+    <div class="demo-head"><h3>Action conditioning, wired exactly like MIRA</h3><span class="badge viz">real mechanism · random (untrained) weights</span></div>
+    <div class="kb" id="kb"></div>
+    <div class="controls" style="margin-top:12px">
+      <label>flow time τ <input type="range" id="adaTau" min="0" max="1" step="0.01" value="0.5" /> <b class="mono" id="adaTauV">0.50</b></label>
+      <label>token <select id="tokSel"><option value="0">P1 view · ball</option><option value="1">P2 view · sky</option><option value="2">P3 view · car</option><option value="3">P4 view · HUD</option></select></label>
+      <button id="randKeys">random keys</button>
+    </div>
+    <div class="flow">
+      <div class="stage"><h4><span class="c-act">emb(a¹:⁴)</span> + <span class="c-noise">emb(τ)</span> = <span class="c-wm">c</span></h4><canvas id="cvC" width="360" height="200"></canvas></div>
+      <div class="stage"><h4><span class="c-wm">γ(c)</span> scale &amp; <span class="c-wm">β(c)</span> shift</h4><canvas id="cvGB" width="360" height="200"></canvas></div>
+      <div class="stage"><h4>token: LN(x) → (1+γ)·LN(x)+β</h4><canvas id="cvX" width="360" height="200"></canvas></div>
+    </div>
+    <p class="note">Notice that <b>pressing P1's W changes γ and β for every token, including P4's HUD token</b>. The conditioning is broadcast to all
+      positions. Nothing tells the model which key belongs to which view: it has to <i>learn</i> that P1's keys move P1's camera and P1's car as seen by
+      others, and leave the sky alone. The "absent" checkbox swaps in the learned <b>absent token</b> used for action dropout (Ch. 05).
+      Actions are logged at 20 fps and latents run at 10 Hz, so a learned linear layer also pools the two action frames that fall inside each latent step.</p>
+  </div>
+
+  <h2>4 · One block, and the whole stack</h2>
+  <div class="demo">
+    <div class="demo-head"><h3>AdaLN space-time block × 16</h3><span class="badge paper">Fig. 4 / Table 11</span></div>
+    <svg id="blockSvg" viewBox="0 0 1100 230" style="width:100%;height:auto"></svg>
+  </div>
+  <table class="t">
+    <tr><th>Model</th><th class="n">width</th><th class="n">layers</th><th class="n">heads (q/kv)</th><th>notes</th></tr>
+    <tr><td>Baseline ablation model</td><td class="n">2048</td><td class="n">16</td><td class="n">16 / 4</td><td>1B; temporal attention every 4 layers; 78-frame training context</td></tr>
+    <tr><td><b>Live-demo model</b></td><td class="n">4096</td><td class="n">16</td><td class="n">32 / 8</td><td>≈5B; 30k single-player + 100k multiplayer steps</td></tr>
+  </table>
+  <p class="prose muted" style="margin-top:12px">Stabilisers used throughout: grouped-query attention (cheaper KV cache), QK-normalisation, a sigmoid gate on the attention output,
+    SwiGLU feed-forward, and learnable spatial and temporal <b>register tokens</b>, which give attention somewhere to dump global information.</p>
+</main>
+<script type="module" src="/src/ch4.js"></script>
+</body>
+</html>

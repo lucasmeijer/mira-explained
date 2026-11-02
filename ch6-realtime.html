@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>06 · Real-time — MIRA explained</title>
+<style>
+  .rt { display: grid; grid-template-columns: 1fr 1.25fr; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .rt { grid-template-columns: 1fr; } }
+  .rt canvas { width: 100%; height: auto; display: block; border-radius: 10px; }
+  .sl { display: grid; grid-template-columns: 170px 1fr 70px; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); margin: 6px 0; }
+  .sl b { color: var(--text); font-family: var(--mono); text-align: right; }
+  .sl input { width: 100%; }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  #win canvas { width: 100%; display: block; }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="kicker">Chapter 06 · Section 5 of the paper</div>
+    <h1>Streaming at <span class="c-good" style="color:var(--good)">20 fps</span> on one GPU</h1>
+    <p class="lede">An interactive world model has a hard deadline: a new frame every <b>50 ms</b>, whatever the player does. MIRA meets it on
+      a single Nvidia B200. One step (world model + decoder) takes about <b>70 ms</b> and yields <b>two</b> frames, so roughly 35 ms per frame.
+      This chapter is a working simulator of that serving loop. It plays real MIRA frames, so when the pipeline falls behind, you'll <i>see</i> the stutter.</p>
+  </section>
+
+  <h2>1 · The rolling context window</h2>
+  <div class="demo" id="win">
+    <div class="demo-head"><h3>KV cache + fixed window of 20 latents</h3><span class="badge viz">exact window size · real frames</span>
+      <button id="winStep" style="margin-left:auto">step ▶</button><button id="winAuto">auto</button><button id="winReset">↺ new session</button></div>
+    <canvas id="cvWin" width="1100" height="190"></canvas>
+    <p class="note">A session starts with <b>prefill</b>: a short clip of <span style="color:var(--good)">real gameplay</span> is encoded and its keys/values are written into
+      the cache. Then each <b>decode</b> step appends one fresh noise latent, denoises it into the next <span class="c-wm">generated</span> latent (conditioned on the newest keys),
+      and drops the oldest. Because past keys and values are cached, every step costs the same no matter how long you play. The decoder only needs the
+      3 most recent latents. The price: anything older than 2 s is forgotten (the replay and clock failures in Ch. 07).</p>
+  </div>
+
+  <h2>2 · The serving loop, simulated</h2>
+  <div class="demo" id="demoRT">
+    <div class="demo-head"><h3>Producer → bounded queue → display</h3><span class="badge toy">simulation of the paper's pipeline · timings adjustable</span></div>
+    <div class="rt">
+      <div>
+        <canvas id="cvScreen" width="512" height="288" style="border:1px solid var(--line)"></canvas>
+        <div class="grid3" style="margin-top:10px">
+          <div class="stat"><div class="v" id="stFps">–</div><div class="k">delivered fps (target 20)</div></div>
+          <div class="stat"><div class="v" id="stStall">–</div><div class="k">stalled display ticks</div></div>
+          <div class="stat"><div class="v" id="stLat">–</div><div class="k">key → screen latency</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="presets"><span class="tag" style="align-self:center">presets:</span>
+          <button data-p="mira">MIRA (distilled, cached)</button>
+          <button data-p="nodistill">no distillation (10 steps)</button>
+          <button data-p="nocache">no KV cache</button>
+          <button data-p="noqueue">no queue (show immediately)</button></div>
+        <div class="sl"><span>denoising steps / latent</span><input type="range" id="nfe" min="1" max="10" step="1" value="2" /><b id="nfeV"></b></div>
+        <div class="sl"><span>ms per transformer pass</span><input type="range" id="msNfe" min="5" max="60" step="1" value="25" /><b id="msNfeV"></b></div>
+        <div class="sl"><span>decoder ms (→ 2 frames)</span><input type="range" id="msDec" min="5" max="60" step="1" value="20" /><b id="msDecV"></b></div>
+        <div class="sl"><span>queue capacity (frames)</span><input type="range" id="qcap" min="0" max="8" step="1" value="4" /><b id="qcapV"></b></div>
+        <div class="sl"><span>jitter (± ms)</span><input type="range" id="jit" min="0" max="40" step="1" value="8" /><b id="jitV"></b></div>
+        <label class="tag" style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="kv" checked /> KV cache (otherwise each pass re-processes all 20 context frames ≈ 20× the work)</label>
+        <div class="controls"><button class="primary" id="rtRun">▶ Run</button><label>time scale <select id="rtScale"><option value="1">real time</option><option value="0.25">¼ slow-mo</option></select></label></div>
+        <div class="stat" style="margin-top:6px"><div class="k">one step = <b id="stepMs" class="mono"></b> → <b id="perFrame" class="mono"></b> per frame vs. a 50 ms budget</div></div>
+      </div>
+    </div>
+    <canvas id="cvGantt" width="1100" height="200" style="margin-top:14px"></canvas>
+    <p class="note">Top lanes show what the GPU is doing (world-model passes in amber, decoding in blue). The middle lane shows frames waiting in the queue. The bottom lane shows the
+      display reading a frame every 50 ms: green means a new frame, red means it had to repeat the old one (a visible stutter). The paper's design: each step bursts out
+      <b>two</b> frames, a separate sender drains the queue at a steady cadence, and a full queue <b>blocks</b> the producer (backpressure), so generation is paced to the display and never races ahead.
+      Notice the trade-off in the latency box: a deeper queue absorbs more jitter but adds up to 50 ms of delay per buffered frame between pressing a key and seeing its effect.</p>
+  </div>
+
+  <h2>3 · Where the milliseconds come from</h2>
+  <table class="t">
+    <tr><th>Trick</th><th>What it buys</th></tr>
+    <tr><td><span class="chip noise">Few-step distillation</span> (Ch. 02)</td><td>1–2 transformer passes per latent instead of ~10+</td></tr>
+    <tr><td><span class="chip lat">10 Hz latents</span> (Ch. 01)</td><td>one step → 2 frames; the world-model sequence is half as long "at no cost in quality"</td></tr>
+    <tr><td><span class="chip wm">KV cache + rolling window</span></td><td>constant per-step cost; GQA (8 KV heads) keeps the cache small</td></tr>
+    <tr><td><span class="chip dec">Causal decoder on 3 latents</span></td><td>constant-cost decoding that can stream</td></tr>
+    <tr><td>TorchInductor + CUDA graphs</td><td>operator fusion, less CPU launch overhead</td></tr>
+    <tr><td>cuDNN / custom Triton attention</td><td>cuDNN for spatial attention and prefill; Triton kernels for temporal attention while decoding</td></tr>
+    <tr><td>Producer/consumer + JPEG off-thread</td><td>smooth 20 fps delivery from bursty 2-frame steps</td></tr>
+  </table>
+</main>
+<script type="module" src="/src/ch6.js"></script>
+</body>
+</html>

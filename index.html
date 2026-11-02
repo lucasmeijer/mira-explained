@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MIRA, explained — an interactive series</title>
+<style>
+  .heroGrid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 26px; align-items: center; }
+  @media (max-width: 900px) { .heroGrid { grid-template-columns: 1fr; } }
+  #mapSvg { width: 100%; height: auto; display: block; }
+  #mapSvg .node { cursor: pointer; }
+  #mapSvg .node:hover rect { filter: brightness(1.3); }
+  .roleCard { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-height: 150px; }
+  .roleCard h3 { margin: 0 0 6px; }
+  .roleCard .kv { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .roleCard .kv span { font: 12px var(--mono); background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+  .chapters { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .chapters a { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; color: var(--text); transition: border-color .15s, transform .15s; }
+  .chapters a:hover { text-decoration: none; border-color: #3a475e; transform: translateY(-2px); }
+  .chapters .n { font: 700 12px var(--mono); color: var(--muted); }
+  .chapters h3 { margin: 4px 0 6px; font-size: 17px; }
+  .chapters p { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+  .chapters .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero heroGrid">
+    <div>
+      <div class="kicker">An interactive series on arXiv 2607.05352 · General Intuition × Kyutai × Epic Games</div>
+      <h1>MIRA, explained</h1>
+      <p class="lede">MIRA is a 5-billion-parameter <b>world model</b> that <i>is</i> a game of Rocket League. It has no physics or rendering engine: it predicts four
+        players' video, 20 frames per second, from their keyboard presses. These chapters take it apart one component at a time, with <b>demos that actually run in
+        your browser</b>: a real DINOv3 encoder, flow-matching models you train yourself, and learned toy world models you can play inside.</p>
+      <div class="legend" style="margin-top:14px">
+        <span><span class="badge real">real</span> real model/training running in your browser</span>
+        <span><span class="badge toy">toy</span> real learned model in a miniature world</span>
+        <span><span class="badge viz">viz</span> exact shapes &amp; mechanics, visualised</span>
+        <span><span class="badge paper">paper</span> numbers from the report</span>
+      </div>
+    </div>
+    <figure><video src="/media/hero-v2.mp4" autoplay muted loop playsinline></video><figcaption>Four players' views, generated jointly by MIRA in real time (official blog video).</figcaption></figure>
+  </section>
+
+  <h2>The whole machine on one page</h2>
+  <p class="prose">Click any block to see its job. Press <b>▶ one tick</b> to follow a single 100 ms step: one new latent, two new frames for each player.</p>
+  <div class="demo">
+    <div class="demo-head"><h3>MIRA's pipeline</h3><span class="badge viz">shapes from the paper</span>
+      <button id="tickBtn" style="margin-left:auto" class="primary">▶ one tick</button></div>
+    <svg id="mapSvg" viewBox="0 0 1120 480"></svg>
+    <div class="roleCard" id="roleCard"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="callout"><b>The one-line summary</b>
+      Encode each player's view into a small <span class="c-enc">DINO</span>-based latent. Let a <span class="c-wm">transformer</span>, steered by
+      all four players' <span class="c-act">keys</span>, <span class="c-noise">generate</span> the next latent with a few flow-matching steps. Decode it into 2 frames per view.
+      Append it to the context and repeat, 10 times a second, for hours.</div>
+    <div class="callout lat"><b>The three choices the paper says matter most</b>
+      ① predict in the latent of a <b>frozen pretrained</b> encoder (stability), ② <b>diffusion forcing + few-step distillation</b> (long horizons at speed),
+      ③ condition on <b>all four action streams</b> (less uncertainty, consistent views).</div>
+  </div>
+
+  <h2>Chapters</h2>
+  <div class="chapters" id="chapters"></div>
+</main>
+<script type="module" src="/src/index.js"></script>
+</body>
+</html>

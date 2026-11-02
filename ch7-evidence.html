@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>07 · Evidence & failures — MIRA explained</title>
+<style>
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } }
+  .metrics .m { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .metrics .m h4 { margin: 0 0 4px; font-size: 14px; }
+  .metrics .m p { margin: 4px 0 0; font-size: 13.5px; color: var(--muted); }
+  .fail { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .fail { grid-template-columns: 1fr; } }
+  .fail .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .fail .card h4 { margin: 0 0 6px; }
+  .fail .cause { font-size: 12.5px; margin-top: 8px; }
+  .clock { display: flex; gap: 6px; font-family: var(--mono); flex-wrap: wrap; margin: 8px 0; }
+  .clock span { background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+  .clock span.bad { border-color: var(--bad); color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="kicker">Chapter 07 · Sections 6.2, 6.5, 6.7–6.9 of the paper</div>
+    <h1>How we know it works, and where it <span style="color:var(--bad)">breaks</span></h1>
+    <p class="lede">A world model's future is unknowable, so you can't just compare frames to ground truth. MIRA is judged on four axes: does it
+      <b>look</b> real, does it <b>obey</b> the keys, does it get the <b>physics</b> right, and do <b>humans</b> agree. Then come the failures, and each one
+      traces back to a specific component you met in earlier chapters.</p>
+  </section>
+
+  <h2>The evaluation toolbox</h2>
+  <div class="metrics">
+    <div class="m"><h4 class="c-dec">Looks real?</h4><p><b>gFID / gFVD / gFDD</b>: distances between the distributions of generated and real clips (Inception, I3D and DINOv3 features).
+      Tracked over the rollout horizon to expose drift.</p></div>
+    <div class="m"><h4 class="c-act">Obeys the keys?</h4><p><b>ARR</b>, the Action Recoverability Ratio: how detectable each commanded key is in the generated video, divided by how detectable it is in
+      a plain codec reconstruction. 1.0 = as faithful as possible.</p></div>
+    <div class="m"><h4 class="c-wm">Right physics?</h4><p><b>Game-state probe</b>: an MLP that reads ball and car positions, rotations and velocities out of the world model's activations.
+      Trained on real latents, tested on the model's own rollouts.</p></div>
+    <div class="m"><h4 class="c-good" style="color:var(--good)">Humans agree?</h4><p><b>Bayesian Elo</b> from pairwise human preferences, both for visual quality and for action adherence. ARR vs. human Elo:
+      Pearson r = 0.84, Spearman ρ = 0.93.</p></div>
+  </div>
+
+  <h2>ARR in miniature: run it yourself</h2>
+  <div class="grid2">
+    <div class="prose">
+      <p>The paper's recipe, reproduced on Rocket Pong:</p>
+      <ol style="padding-left:20px">
+        <li>Train an <b>action probe</b>, an inverse-dynamics model that sees two consecutive states and guesses which key P1 pressed. Here it's trained on engine data.</li>
+        <li>Roll the world model out from real starts using the <b>real</b> key sequence.</li>
+        <li>Score the probe's detections with average precision on the generated transitions (AP<sub>gen</sub>) and on the real ones (AP<sub>real</sub>).</li>
+        <li><b>ARR = AP<sub>gen</sub> / AP<sub>real</sub></b>, averaged over keys.</li>
+      </ol>
+      <p class="muted">In MIRA the probe is a frozen DINOv3-B with a small attention head watching 8-frame video windows (0.84 mAP on real video), and the denominator is the
+        codec reconstruction rather than the raw data, which cancels the codec's own losses.</p>
+    </div>
+    <div class="demo" style="margin:0" id="demoARR">
+      <div class="demo-head"><h3>Action Recoverability Ratio</h3><span class="badge real">real probe + real learned models</span></div>
+      <div class="controls"><button class="primary" id="btnARR">▶ Train probe &amp; evaluate (~10 s)</button><span class="tag" id="arrInfo"></span></div>
+      <div id="chARR"></div>
+      <p class="note" id="arrNote">Compares the teacher- and diffusion-forced models from Ch. 03 inside the first 4 s (MIRA's training-clip length) and over 4–20 s, plus a control where P1's keys are hidden from the model.</p>
+    </div>
+  </div>
+  <div class="callout act"><b>What the paper found with ARR</b>
+    Controllability keeps improving <i>long after</i> image quality has plateaued: the model first learns to paint realistic frames, then spends most of training learning what the keys do.
+    Rare keys (air-roll, reverse) score lowest, and ARR rises with how often a key appears in the data (r = 0.82). More unique data barely moves gFID past ~50 hours, but
+    keeps raising ARR. Pixel-space models: ARR 0.49–0.61. MIRA's latent model: 0.91.</div>
+
+  <h2>Scaling, in four numbers</h2>
+  <div class="grid4">
+    <div class="stat"><div class="v">100M → 5B</div><div class="k">five model sizes, same data; bigger = lower FID/FVD and faster convergence, with diminishing returns past 2.5B</div></div>
+    <div class="stat"><div class="v c-wm">2130 → 1448</div><div class="k">ball-position probe error (Unreal units), 100M → 5B: bigger models encode the physics better</div></div>
+    <div class="stat"><div class="v c-act">&lt; 50 h</div><div class="k">below ~50 hours of unique data, both fidelity and controllability collapse</div></div>
+    <div class="stat"><div class="v c-dec">~390 APM</div><div class="k">bots' actions per minute. Humans play slower and more erratically, yet the model stays coherent under human play</div></div>
+  </div>
+
+  <h2>Failure modes, and which component causes them</h2>
+  <div class="fail">
+    <div class="card">
+      <h4>Goal replays are made up</h4>
+      <video src="/media/replay-inaccurate-small.mp4" muted loop playsinline controls preload="metadata"></video>
+      <p class="muted">After a goal the game cuts to a replay, but by then the goal has scrolled out of the context. The model "simply makes something up". The multiplayer model
+        sometimes diverges entirely during replays.</p>
+      <div class="cause"><span class="chip wm">cause: 20-latent context window (Ch. 04/06)</span></div>
+    </div>
+    <div class="card">
+      <h4>The clock and score lose track</h4>
+      <div class="clock"><span>4:54</span><span>4:53</span><span>4:53</span><span class="bad">4:52</span><span class="bad">4:54</span><span class="bad">4:53</span></div>
+      <p class="muted">Five real seconds, sampled once per second (Fig. 19). The clock barely moves and even ticks back up. Score updates and clock milestones happen once per game, so they're
+        rare in the data. Yet the errors stay <i>self-consistent</i>: when the model's own clock hits 0:30 it still shows the "30 seconds remaining" banner.</p>
+      <div class="cause"><span class="chip wm">cause: short context</span> <span class="chip act">+ rare events in data</span></div>
+    </div>
+    <div class="card">
+      <h4>Out-of-distribution play "melts", then recovers</h4>
+      <video src="/media/melting-reset-2-small.mp4" muted loop playsinline controls preload="metadata"></video>
+      <p class="muted">Park all four cars far from the ball and the views dissolve into noise. With the frozen-DINO codec the model <b>snaps back</b> on its own. The earlier distilled codecs stayed broken.</p>
+      <div class="cause"><span class="chip enc">recovery: smooth DINO latent (Ch. 01)</span> <span class="chip noise">+ diffusion forcing (Ch. 03)</span></div>
+    </div>
+    <div class="card">
+      <h4>Uncommanded boosts and jumps; the ball rolls by itself</h4>
+      <video src="/media/melting.mp4" muted loop playsinline controls preload="metadata"></video>
+      <p class="muted">In ~40 min of human play (≈48,000 frames): about 80 boosts and 30 jumps nobody pressed. They cluster at kickoff, where the bots <i>always</i> boost. A resting
+        ball is rare in the data, so the learned prior keeps it moving toward a goal.</p>
+      <div class="cause"><span class="chip act">cause: data imbalance (one bot policy)</span></div>
+    </div>
+  </div>
+
+  <h2>Recap: every component and its job</h2>
+  <table class="t">
+    <tr><th>Component</th><th>Job</th><th>If you remove or weaken it…</th><th>Ch.</th></tr>
+    <tr><td><span class="chip enc">Frozen DINOv3-L</span></td><td>meaningful, smooth latent space</td><td>gFID 10.7 → 22.5, 1.7× more drift, no recovery from OOD</td><td>01</td></tr>
+    <tr><td><span class="chip lat">Linear bottleneck</span></td><td>2×2 space, 2× time, 1024→32 channels: real-time-sized latent</td><td>pixel space: gFID ≈ 81–105, ARR ≈ 0.5–0.6</td><td>01</td></tr>
+    <tr><td><span class="chip dec">ViT decoder</span></td><td>paint 2 frames per latent, causally</td><td>Base-size decoder: blurrier, slightly worse generation</td><td>01</td></tr>
+    <tr><td><span class="chip noise">Flow matching</span></td><td>sample one sharp future</td><td>regression would blur the possible futures together</td><td>02</td></tr>
+    <tr><td><span class="chip noise">Few-step distillation</span></td><td>1–2 passes per latent</td><td>~10 passes: far below 20 fps</td><td>02/06</td></tr>
+    <tr><td><span class="chip noise">Diffusion forcing</span></td><td>robust to its own imperfect history</td><td>teacher forcing: gFID 32.5 vs 10.7, ~10× worse long-horizon</td><td>03</td></tr>
+    <tr><td><span class="chip wm">Space-time transformer</span></td><td>cross-view consistency (space) + memory/motion (time)</td><td>full attention: ~20× more attention pairs</td><td>04</td></tr>
+    <tr><td><span class="chip act">AdaLN action conditioning</span></td><td>keys steer every layer, every token</td><td>no control at all</td><td>04</td></tr>
+    <tr><td><span class="chip act">Tiling + per-player actions</span></td><td>joint world; correct attribution</td><td>single-player: lost and merging cars, more uncertainty</td><td>05</td></tr>
+    <tr><td><span class="chip act">Action dropout</span></td><td>autopilot for uncontrolled players</td><td>every player must be driven externally</td><td>05</td></tr>
+    <tr><td><span class="chip wm">KV cache, rolling window, queue</span></td><td>constant cost per step, smooth 20 fps</td><td>cost grows with time; stutter</td><td>06</td></tr>
+  </table>
+</main>
+<script type="module" src="/src/ch7.js"></script>
+</body>
+</html>

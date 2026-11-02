@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>05 · Multiplayer — MIRA explained</title>
+<style>
+  .play { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .play { grid-template-columns: 1fr; } }
+  .play canvas { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid var(--line); }
+  .pcard { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .pcard h4 { margin: 0 0 6px; font-size: 13px; }
+  .matrix { display: grid; grid-template-columns: 90px repeat(3, 1fr); gap: 4px; font-size: 12px; }
+  .matrix div { padding: 6px; border-radius: 6px; text-align: center; font-family: var(--mono); }
+  .matrix .h { color: var(--muted); background: transparent; font-family: var(--sans); font-weight: 600; }
+  .vids3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 900px) { .vids3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="kicker">Chapter 05 · Sections 4.5, 6.6 and 6.8 of the paper</div>
+    <h1>Four players, one world: <span class="c-act">attribution</span>, consistency and autopilot</h1>
+    <p class="lede">Most game world models take one action stream and treat everyone else as part of the scenery. MIRA conditions on
+      <b>all four players' keys</b> and renders <b>all four views jointly</b>. That raises three questions. Does it learn whose key does what?
+      Do the views agree with each other? And what happens to a player whose keys it doesn't get? You can poke at all three on a learned toy model below.</p>
+  </section>
+
+  <h2>The three multiplayer ingredients</h2>
+  <div class="grid3">
+    <div class="callout lat"><b>1 · Tiled views</b> The four 9×16 latent grids are stacked into one 36×16 grid. Space attention spans all of them,
+      so the ball, the clock and a demolition are rendered once, consistently, from four cameras (Fig. 5, 6, 17).</div>
+    <div class="callout act"><b>2 · Per-player actions</b> Each player's keys go through a per-player embedding. They are concatenated in the same fixed order as the
+      tiles and broadcast to every token through AdaLN. The model must <i>learn</i> which keys affect which pixels.</div>
+    <div class="callout"><b>3 · Action dropout</b> During training a player's embedding is randomly swapped for a learned <b>absent</b> token. To keep
+      predicting, the model must infer that player's intent from the scene, so it learns the bots' <i>policy</i> as a side effect.</div>
+  </div>
+  <figure style="margin-top:12px"><video src="/media/hero-v2.mp4" autoplay muted loop playsinline style="max-height:420px;object-fit:contain"></video>
+    <figcaption>Real MIRA output: four mutually consistent player views generated jointly at 20 fps (from the official blog).</figcaption></figure>
+
+  <h2>Play inside a learned world model</h2>
+  <p class="prose">There is <b>no physics engine</b> running below, only the diffusion-forced Rocket Pong world model from Chapter 03 rolling forward on its own predictions.
+    It was trained with 20% per-player action dropout. Drive <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> for P1
+    and <span class="kbd">↑</span><span class="kbd">←</span><span class="kbd">↓</span><span class="kbd">→</span> for P2, or hand a player to the model's autopilot.</p>
+
+  <div class="demo" id="demoPlay">
+    <div class="demo-head"><h3>Rocket Pong, dreamed</h3><span class="badge real">real learned model · runs live in your browser</span></div>
+    <div class="play">
+      <div>
+        <canvas id="cvPlay" width="640" height="410" tabindex="0"></canvas>
+        <div class="controls">
+          <button class="primary" id="btnPlay">▶ Start</button>
+          <button id="btnKick">↺ Kickoff</button>
+          <label><input type="checkbox" id="showEngine" /> show what the real engine would do (ghost)</label>
+          <span class="tag" id="playInfo"></span>
+        </div>
+      </div>
+      <div>
+        <div class="pcard"><h4 class="c-dec">P1 (blue)</h4>
+          <div class="seg" id="p1Mode"><button data-m="keys" class="on">keys W A S D</button><button data-m="auto">autopilot</button><button data-m="idle">idle</button></div></div>
+        <div class="pcard"><h4 class="c-noise">P2 (orange)</h4>
+          <div class="seg" id="p2Mode"><button data-m="keys">keys ↑ ← ↓ →</button><button data-m="auto" class="on">autopilot</button><button data-m="idle">idle</button></div></div>
+        <div class="pcard"><h4>Who moves what? <span class="tag">live attribution probe</span></h4>
+          <div class="matrix" id="matrix"></div>
+          <p class="note" style="margin:6px 0 0">Each cell: how far the model's next-step prediction for that object moves when you swap that player's key among its 5
+            options, holding everything else fixed (averaged over the last ~2 s). A clean diagonal means the model attributes cars to the right player.</p>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>autopilot</b> = feed the learned <i>absent</i> token instead of keys. The car keeps chasing the ball like the scripted bot it was trained on, and
+      nobody wrote that policy into the model. <b>idle</b> = feed "no key pressed", and the car (correctly) coasts to a stop. Try both players on autopilot for a
+      model-vs-model match, like MIRA's four-autopilot showdowns.</p>
+  </div>
+
+  <h2>Why giving the model everyone's keys helps</h2>
+  <div class="grid2">
+    <div class="demo" style="margin:0">
+      <div class="demo-head"><h3>Prediction error with vs. without P2's keys</h3><span class="badge real">measured live on held-out matches</span></div>
+      <div id="chAttr"></div>
+      <p class="note" id="attrNote">computing…</p>
+    </div>
+    <div class="prose">
+      <p>A single-player model is told only one player's keys. Everyone else's choices become <b>hidden variables</b> it has to guess. Guessing adds
+        uncertainty, and over a rollout uncertainty turns into error. That's what the toy shows on the left, and it's what the paper finds at full scale:
+        <i>"multiplayer world models substantially outperform their single-player counterparts … the additional views and action streams reduce uncertainty about the future."</i></p>
+      <p>The single-player MIRA models also show the classic symptoms: a car that leaves the screen for longer than the context window is gone when the camera
+        returns, and cars occasionally <b>merge into the ball</b>. The multiplayer model "largely avoids the first failure", and car–ball merging wasn't observed at all.</p>
+      <div class="callout"><b>Training recipe</b> Multiplayer from scratch <i>collapsed</i> at the 1B budget. Pre-training on single-player views and then continuing on 4-player
+        tiles fixed it, because RoPE lets the same weights run on the bigger grid. The live model: 30k single-player steps, then 100k multiplayer steps.</div>
+    </div>
+  </div>
+
+  <h2>The real thing</h2>
+  <div class="vids3">
+    <figure><video src="/media/autopilot-crushing.mp4" muted loop playsinline controls preload="metadata"></video><figcaption>Four autopilots: every player's action is "absent", so MIRA plays all four bots itself.</figcaption></figure>
+    <figure><video src="/media/object-permanence.mp4" muted loop playsinline controls preload="metadata"></video><figcaption>Single-player 1B model forgets the blue car after it hides behind the ball.</figcaption></figure>
+    <figure><video src="/media/boost-management.mp4" muted loop playsinline controls preload="metadata"></video><figcaption>Learned state: boost only works until the gauge runs out, and nobody programmed that rule.</figcaption></figure>
+  </div>
+</main>
+<script type="module" src="/src/ch5.js"></script>
+</body>
+</html>

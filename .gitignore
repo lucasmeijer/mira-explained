@@ -1,0 +1,6 @@
+node_modules/
+dist/
+public/models/dinov3-s16/
+public/ort/
+public/media/
+public/frames/

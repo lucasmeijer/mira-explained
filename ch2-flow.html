@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>02 · Flow matching — MIRA explained</title>
+<style>
+  .pane { background: #0a0d13; border: 1px solid var(--line); border-radius: 10px; position: relative; }
+  .pane canvas { width: 100%; height: auto; display: block; }
+  .pane .cap { position: absolute; left: 10px; top: 8px; font: 600 11.5px var(--mono); color: var(--muted); pointer-events: none; }
+  .formula { font-family: var(--mono); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; line-height: 1.9; }
+  .formula .c-noise, .formula .c-wm { font-weight: 700; }
+  .stepsel button { min-width: 40px; }
+  .cmp { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 900px) { .cmp { grid-template-columns: 1fr 1fr; } }
+  .cmp .pane .cap b { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="kicker">Chapter 02 · Section 4.3 of the paper</div>
+    <h1>Flow matching: how the world model <span class="c-noise">imagines</span> the next frame</h1>
+    <p class="lede">MIRA's transformer doesn't output the next latent frame directly. It outputs a <b>velocity</b>: a direction
+      that slowly pushes random noise toward a plausible next frame. Here you'll train that exact objective live, on 2-D points
+      instead of 18,432-number latents. Then you'll apply MIRA's trick (progressive self-distillation) that lets it jump from noise
+      to frame in just 1–2 steps, which is what makes 20 fps possible.</p>
+  </section>
+
+  <div class="callout noise"><b>Why generate instead of regress?</b>
+    The future is uncertain: the opponent might jump or might not. A plain regression to "the next frame" would average the possible
+    futures into a blur. A generative model <i>samples one sharp future</i>. Flow matching is the generative objective MIRA uses.</div>
+
+  <h2>1 · The training signal is a straight line</h2>
+  <div class="grid2">
+    <div class="prose">
+      <p>Take a real data point <b>z₁</b> (in MIRA, the true next latent frame) and a pure noise sample <b>z₀</b>. Mix them:</p>
+      <div class="formula">
+        z<sub>τ</sub> = τ·<span class="c-lat">z₁</span> + (1−τ)·<span class="c-noise">z₀</span>&nbsp;&nbsp;&nbsp;τ ∈ [0,1]<br/>
+        loss = ‖ <span class="c-wm">v<sub>θ</sub>(z<sub>τ</sub>, τ, context, actions)</span> − (<span class="c-lat">z₁</span> − <span class="c-noise">z₀</span>) ‖²
+      </div>
+      <p>The network sees the noisy mix and the noise level τ, and must say <b>which way to move</b>. On the straight line, the right
+        answer is always the same arrow, z₁ − z₀. Drag τ to slide the noise points along their lines.</p>
+      <p class="muted">A single point z<sub>τ</sub> can lie on lines heading to many different targets. So the best the network can do is
+        output the <i>average</i> direction. That averaging comes back to bite us in section 3.</p>
+    </div>
+    <div class="demo" style="margin:0">
+      <div class="demo-head"><h3>Noise ↔ data interpolation</h3><span class="badge viz">visualisation</span></div>
+      <div class="pane"><canvas id="cvInterp" width="560" height="340"></canvas><span class="cap" id="tauCap">τ = 0.00</span></div>
+      <div class="controls"><label>τ <input type="range" id="tau" min="0" max="1" step="0.01" value="0" /></label>
+        <button id="tauPlay">▶ animate</button><label><input type="checkbox" id="showLines" checked /> show pairs</label></div>
+    </div>
+  </div>
+
+  <h2>2 · Train a flow model in your browser</h2>
+  <div class="demo" id="demoTrain">
+    <div class="demo-head"><h3>Learn the velocity field for "MIRA"</h3><span class="badge real">real training · flow-matching loss · runs on your CPU</span></div>
+    <div class="controls">
+      <button class="primary" id="btnTrain">▶ Train</button>
+      <button id="btnReset">Reset</button>
+      <span class="tag" id="trainInfo">step 0 · loss –</span>
+      <span class="tag muted">MLP 8→128→128→128→2 · batch 128 · Adam</span>
+    </div>
+    <div class="grid3">
+      <div class="pane"><canvas id="cvSamples" width="420" height="300"></canvas><span class="cap">samples after <b id="nLbl">8</b> Euler steps</span></div>
+      <div class="pane"><canvas id="cvPaths" width="420" height="300"></canvas><span class="cap">paths noise → data</span></div>
+      <div class="pane"><canvas id="cvField" width="420" height="300"></canvas><span class="cap" id="fieldCap">velocity field at τ=0.50</span></div>
+    </div>
+    <div class="controls">
+      <span class="tag">sampling steps</span>
+      <div class="seg stepsel" id="stepSel">
+        <button data-n="1">1</button><button data-n="2">2</button><button data-n="4">4</button><button data-n="8" class="on">8</button><button data-n="16">16</button><button data-n="64">64</button>
+      </div>
+      <label>field at τ <input type="range" id="fieldTau" min="0" max="0.98" step="0.02" value="0.5" /></label>
+    </div>
+    <div id="lossChart" style="max-width:520px"></div>
+    <p class="note">Train for ~800–1500 steps (30–60 s), then switch between <b>1</b> and <b>64</b> steps. With many small steps the samples
+      trace the letters. With <b>1 step</b> everything lands in a smeared average in the middle, because the first step follows the
+      average direction from pure noise. The curved paths in the middle panel show why: the flow bends, and one straight jump can't follow a bend.</p>
+  </div>
+
+  <h2>3 · Teach it to take big steps (progressive self-distillation)</h2>
+  <div class="grid2">
+    <div class="prose">
+      <p>Running the 5B transformer 64 times per frame would be far too slow for 20 fps. MIRA's fix (following shortcut and consistency models) gives
+        the network one more input, the <b>step size Δ</b>, and teaches it a self-consistency rule:</p>
+      <div class="formula">
+        one step of size Δ  ≈  two steps of size Δ/2<br/>
+        <span class="muted">target = ½[ v(z<sub>s</sub>, s, Δ/2) + v(ẑ<sub>u</sub>, u, Δ/2) ]  (stop-grad)</span>
+      </div>
+      <p>Small steps are trustworthy because they come from plain flow matching. Through this rule, accuracy propagates up to Δ = ½ and then Δ = 1.
+        At sampling time you tell the network "I'm taking one giant step", and it predicts the <i>average</i> velocity along the
+        curved path instead of the instantaneous one.</p>
+      <div class="callout"><b>In MIRA</b> Few-step distillation runs on a random 10% of training updates (or with a fixed weight). The
+        distilled model "matches many-step sampling quality in one or two function evaluations" and beats the baseline at every step count (Fig. 11).</div>
+    </div>
+  </div>
+    <div class="demo" id="demoPSD">
+      <div class="demo-head"><h3>Distil the model you just trained</h3><span class="badge real">real training · shortcut / PSD objective</span></div>
+      <div class="controls"><button class="primary" id="btnPSD" disabled>▶ Distil (needs step 2 first)</button><span class="tag" id="psdInfo"></span></div>
+      <div class="cmp">
+        <div class="pane"><canvas class="cmpc" width="300" height="220"></canvas><span class="cap">base · <b>1 step</b></span></div>
+        <div class="pane"><canvas class="cmpc" width="300" height="220"></canvas><span class="cap">base · <b>2 steps</b></span></div>
+        <div class="pane"><canvas class="cmpc" width="300" height="220"></canvas><span class="cap c-good">distilled · <b>1 step</b></span></div>
+        <div class="pane"><canvas class="cmpc" width="300" height="220"></canvas><span class="cap c-good">distilled · <b>2 steps</b></span></div>
+      </div>
+      <div id="qualChart" style="margin-top:10px;max-width:640px"></div>
+      <p class="note">Error = symmetric nearest-neighbour (Chamfer) distance between samples and real points, measured live. Lower is better, and it also punishes samples that collapse onto one spot. It's the 2-D
+        stand-in for the gFID-vs-steps curves in Fig. 11 of the paper.</p>
+    </div>
+
+  <h2>Mapping the toy to MIRA</h2>
+  <table class="t">
+    <tr><th></th><th>This page</th><th>MIRA</th></tr>
+    <tr><td>One sample z</td><td>a 2-D point</td><td>the next latent frame for <b>all 4 players</b>: 4 × 9 × 16 × 32 = 18,432 numbers</td></tr>
+    <tr><td>Network v<sub>θ</sub></td><td>4-layer MLP, ~38k params</td><td>16-layer space-time diffusion transformer, 5B params (Ch. 04)</td></tr>
+    <tr><td>Conditioning</td><td>τ (and Δ)</td><td>τ (and Δ) + all four players' actions via AdaLN + past latents via causal temporal attention</td></tr>
+    <tr><td>Noise level per frame</td><td>one τ</td><td>an <b>independent τ per frame</b> during training → diffusion forcing (Ch. 03)</td></tr>
+    <tr><td>Steps per sample</td><td>1–64, your choice</td><td>10 for paper evaluation; few-step distilled sampler with a linear-quadratic schedule for the live demo</td></tr>
+  </table>
+</main>
+<script type="module" src="/src/ch2.js"></script>
+</body>
+</html>
