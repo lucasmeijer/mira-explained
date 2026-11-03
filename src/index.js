@@ -116,6 +116,7 @@ const DESC = {
   'ch2-flow': ['Train a flow-matching model live, watch 1-step sampling fail, then apply MIRA’s self-distillation and watch it succeed in one step.', ['real']],
   'ch3-forcing': ['Two learned world models, identical except for teacher vs. diffusion forcing, play the same match beside the true engine. One drifts away.', ['toy', 'viz', 'paper']],
   'ch4-transformer': ['Built up from makemore: tokens in a 36 (rows) × 16 (columns) × 20 (frames) grid, attention worked out by hand, space vs. time attention, and how a keypress reaches every token through AdaLN.', ['real', 'viz', 'paper']],
+  'ch4b-attention': ['A refresher on attention itself: run Q·Kᵀ → mask → softmax → A·V step by step on real MIRA latent tokens, then multi-head/GQA, RoPE, the space/time reshape and the full block.', ['real', 'viz', 'paper']],
   'ch5-multiplayer': ['Play inside a learned world model, hand players to autopilot (action dropout), and probe whether the model knows whose key moves which car.', ['toy', 'real']],
   'ch6-realtime': ['The rolling KV-cache window and a working simulator of the 20 fps serving loop. Break distillation or the cache and watch the stutter.', ['viz', 'toy']],
   'ch8-training': ['The training recipe stage by stage (what is frozen, what learns, which loss), a decoder you train yourself, a world model learning live, and the GPU budget for every part.', ['real', 'viz', 'paper']],

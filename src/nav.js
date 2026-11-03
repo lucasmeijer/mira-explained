@@ -6,6 +6,7 @@ export const CHAPTERS = [
   { id: 'ch2-flow', n: '02', title: 'Flow matching & few-step sampling', short: 'Flow matching' },
   { id: 'ch3-forcing', n: '03', title: 'Diffusion forcing: why rollouts don’t drift', short: 'Diffusion forcing' },
   { id: 'ch4-transformer', n: '04', title: 'Inside the transformer', short: 'Transformer' },
+  { id: 'ch4b-attention', n: '04b', title: 'How an attention block actually works', short: 'Attention' },
   { id: 'ch5-multiplayer', n: '05', title: 'Four players, one world', short: 'Multiplayer' },
   { id: 'ch6-realtime', n: '06', title: 'Streaming at 20 fps', short: 'Real-time' },
   { id: 'ch7-evidence', n: '07', title: 'How we know it works (and where it breaks)', short: 'Evidence' },
