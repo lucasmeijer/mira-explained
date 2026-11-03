@@ -152,7 +152,84 @@
   <p class="prose muted" style="margin-top:12px">Parameter budget: 5B over 16 blocks is ≈ 310M per block. The two attention layers take ≈ 84M of that (section 3). The rest is
     mostly the SwiGLU MLP, plus the AdaLN projections. (The paper doesn't give the MLP's hidden size.)</p>
 
-  <h2>7 · What it costs per step</h2>
+  <h2>7 · Many attention layers, one machine</h2>
+  <div class="prose">
+    <p>"Attention" isn't one thing in MIRA. Three separate networks use it, each for a different job. Inside the world model, 32 attention layers
+      take turns on the same tokens. This section shows where they all sit and how information passes between them.</p>
+  </div>
+
+  <h3>7a · Every attention layer in the MIRA system</h3>
+  <div class="demo">
+    <div class="demo-head"><h3>Where attention runs, from screen to screen</h3><span class="badge paper">shapes from Tables 9 & 11</span></div>
+    <svg id="mapSvg" viewBox="0 0 1100 360" style="width:100%;height:auto"></svg>
+    <table class="t" style="margin-top:10px">
+      <tr><th>network</th><th>attention layers</th><th>tokens one layer sees</th><th>mixes across views?</th><th>runs</th></tr>
+      <tr><td><span class="chip enc">DINOv3-L encoder</span> (frozen)</td><td class="n">24 layers × 16 heads</td><td>577–581 tokens of <b>one view, one frame</b> (576 patches + class + register tokens), full attention</td><td>no</td><td>only when priming from a real clip</td></tr>
+      <tr><td><span class="chip wm">World model</span></td><td class="n">16 blocks × (1 space + 1 time) × 32 heads</td><td><b>space:</b> 576 tokens = all 4 views of one frame<br/><b>time:</b> one cell across ≤ 20 frames (causal)</td><td><b>yes</b>, the <i>only</i> place views meet</td><td>1–2 passes per 100 ms tick</td></tr>
+      <tr><td><span class="chip dec">Decoder</span></td><td class="n">28 layers × 16 heads</td><td><b>space:</b> 18×32 = 576 tokens of <b>one view</b><br/><b>time:</b> the last 3 latents (causal)</td><td>no, each view is decoded separately</td><td>once per tick, per view</td></tr>
+    </table>
+    <p class="note">The world model has one space and one time layer in each of its 16 blocks, as the paper's block diagram shows. Its 1B baseline puts time attention only in every 4th block. The 5B model's
+      exact arrangement isn't listed, so count "32 attention layers" as the upper end. Either way the principle is the same: <b>the world model's space layers are the only place where
+      the four players' views exchange information</b>. Encoder and decoder each work on one player's screen at a time.</p>
+  </div>
+
+  <h3>7b · How the layers pass information along</h3>
+  <div class="grid2">
+    <div class="prose">
+      <p><b>The residual stream is a shared notebook.</b> Every token carries one vector of 4096 numbers from the bottom of the stack to the top. No layer replaces it;
+        each one <b>reads</b> the current notebook of the tokens it attends to and <b>adds</b> a note:</p>
+      <div class="mathbox">x<sub>final</sub> = x<sub>embed</sub> + Δ<sub>space,1</sub> + Δ<sub>time,1</sub> + Δ<sub>MLP,1</sub> + … + Δ<sub>space,16</sub> + Δ<sub>time,16</sub> + Δ<sub>MLP,16</sub></div>
+      <p>So layers affect each other <b>only through what they write into the notebook</b>. What layer 5 adds is part of the input for layers 6 to 16, in every token that later attends to it.</p>
+      <p><b>Space and time layers take turns moving information:</b></p>
+      <ul>
+        <li>a <b class="c-wm">space</b> layer moves information <i>sideways</i>: to any cell of the same frame, in any player's view;</li>
+        <li>a <b class="c-noise">time</b> layer moves it <i>forward in time</i>: to the same cell in later frames (never backwards).</li>
+      </ul>
+      <p>Neither can do the other's job alone. But <b>one space + one time layer</b> together can bring information from <i>any cell of any earlier frame</i> to any cell
+        of the new frame (two hops: sideways, then forward, or forward, then sideways). Try it in the demo →</p>
+    </div>
+    <div class="demo" style="margin:0" id="demoFlow">
+      <div class="demo-head"><h3>Follow one piece of information through the layers</h3><span class="badge real">exact reachability rules</span></div>
+      <div class="controls">
+        <button class="primary" id="flowNext">next layer ▶</button><button id="flowReset">↺ reset</button>
+        <div class="seg" id="flowOrder"><button data-o="ST" class="on">space → time (MIRA)</button><button data-o="TS">time → space</button></div>
+      </div>
+      <canvas id="cvFlow" width="560" height="380"></canvas>
+      <p class="note" style="margin:4px 0 0">Drawn: 2 of the 4 views and 5 of each view's 144 cells, across 6 of the 20 frames. Click a square to move the starting point.</p>
+      <p class="note" id="flowNote"></p>
+    </div>
+  </div>
+
+  <h3>7c · Same depth, different moments: why the KV cache works</h3>
+  <div class="grid2">
+    <div class="prose">
+      <p>While streaming, only the <b>newest frame</b> runs through the 16 blocks. When its token reaches the time layer of block ℓ, it attends to the past frames'
+        <b>block-ℓ</b> keys and values. Those were computed and stored back when <i>those</i> frames were the newest one.</p>
+      <p>That's allowed only because time attention is <b>causal</b>. A past frame's notebook at block ℓ never depends on anything that came after it, so it never
+        needs updating, and caching is exact. If a time layer could look at the future, every new frame would force the whole past to be recomputed.</p>
+      <p>Each denoising pass runs the whole stack once: 16 × (space → time → MLP) for the new frame's 576 tokens. A tick runs 1–2 passes. The final clean frame's
+        keys and values are what get stored for the next ticks.</p>
+    </div>
+    <div class="demo" style="margin:0">
+      <div class="demo-head"><h3>One streaming step, layer by layer</h3><span class="badge viz">schematic</span></div>
+      <svg id="cacheSvg" viewBox="0 0 560 330" style="width:100%;height:auto"></svg>
+    </div>
+  </div>
+
+  <h3>7d · What the layers end up specialising in</h3>
+  <div class="prose">
+    <p>Nobody assigns roles to layers; they emerge in training. What the paper shows:</p>
+    <ul>
+      <li><b>Cross-view matching</b> (a car token in one view attending to the same car in the other views; the ball; the shared clock) is clearly visible when attention is
+        averaged over <b>layers 4–7</b> of the multiplayer model (Fig. 17), the middle of the stack.</li>
+      <li>The <b>game-state probe</b> reads ball and car positions, rotations and velocities from the <b>last layer</b>'s activations (Section 6.2). By the top of the stack the notebook
+        holds a physics-level description of the scene, and it gets more accurate with model size (Fig. 16).</li>
+    </ul>
+    <p>A common pattern in transformers generally, though the paper doesn't analyse layer by layer: early layers tend to handle local, low-level features; middle layers match and
+      combine things (here, across views and frames); late layers produce what the output head needs (here, the velocity that denoises the next latent).</p>
+  </div>
+
+  <h2>8 · What it costs per step</h2>
   <table class="t">
     <tr><th>layer</th><th>sequences × length</th><th class="n">score matrix entries per head</th><th>scales with</th></tr>
     <tr><td><b class="c-wm">space</b></td><td>20 sequences × 576 tokens</td><td class="n">20 × 576² = 6.6M</td><td>(tokens per frame)²</td></tr>

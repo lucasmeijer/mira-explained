@@ -254,3 +254,115 @@ render();
   svgEl('text', { x: 540, y: 286, fill: '#93a0b4', 'font-size': 10.5, 'text-anchor': 'middle' }, svg).textContent = '→ γ, β for each AdaLN (same for every token)';
   [195, 535, 875].forEach((x) => svgEl('path', { d: `M${x},245 L${x},124`, stroke: '#f472b6', 'stroke-width': 1.2, 'stroke-dasharray': '4 3', fill: 'none' }, svg));
 }
+
+// ------------------------------------------------------------------ 7a: map of all attention in the system
+{
+  const svg = $('#mapSvg');
+  const lanes = [70, 140, 210, 280], cols = ['#38bdf8', '#38bdf8', '#fb923c', '#fb923c'];
+  const T = (x, y, t, o = {}) => (svgEl('text', { x, y, fill: o.fill || '#c8d1de', 'font-size': o.fs || 11.5, 'text-anchor': o.a || 'middle', 'font-weight': o.fw || 400 }, svg).textContent = t);
+  T(60, 26, 'player screens', { fw: 700 }); T(190, 26, 'DINOv3 encoder', { fw: 700, fill: '#2dd4bf' }); T(585, 26, 'world model: 16 blocks', { fw: 700, fill: '#fbbf24' });
+  T(915, 26, 'decoder', { fw: 700, fill: '#38bdf8' }); T(1045, 26, 'screens', { fw: 700 });
+  T(190, 42, '24 layers · per view', { fs: 10.5, fill: '#93a0b4' }); T(585, 42, 'space layers span all 4 lanes · time layers run along each lane', { fs: 10.5, fill: '#93a0b4' }); T(915, 42, '28 layers · per view', { fs: 10.5, fill: '#93a0b4' });
+  lanes.forEach((y, p) => {
+    svgEl('rect', { x: 25, y: y - 18, width: 70, height: 36, rx: 5, fill: cols[p], 'fill-opacity': 0.15, stroke: cols[p] }, svg); T(60, y + 4, `P${p + 1}`, { fw: 700, fill: cols[p] });
+    svgEl('line', { x1: 95, y1: y, x2: 1010, y2: y, stroke: '#263041', 'stroke-width': 2 }, svg);
+    for (let l = 0; l < 24; l++) svgEl('rect', { x: 130 + l * 5, y: y - 14, width: 4, height: 28, fill: '#2dd4bf', 'fill-opacity': 0.55 }, svg);
+    for (let l = 0; l < 28; l++) svgEl('rect', { x: 850 + l * 4.6, y: y - 14, width: 3.6, height: 28, fill: '#38bdf8', 'fill-opacity': 0.55 }, svg);
+    svgEl('rect', { x: 1010, y: y - 18, width: 70, height: 36, rx: 5, fill: cols[p], 'fill-opacity': 0.15, stroke: cols[p] }, svg); T(1045, y + 4, `P${p + 1}`, { fw: 700, fill: cols[p] });
+  });
+  for (let b = 0; b < 16; b++) {
+    const x = 330 + b * 31;
+    svgEl('rect', { x, y: lanes[0] - 22, width: 9, height: lanes[3] - lanes[0] + 44, rx: 3, fill: '#fbbf24', 'fill-opacity': 0.55 }, svg);
+    lanes.forEach((y) => svgEl('rect', { x: x + 12, y: y - 9, width: 9, height: 18, rx: 2, fill: '#fb923c', 'fill-opacity': 0.75 }, svg));
+  }
+  T(338, 330, '■ space (all views)', { fill: '#fbbf24', a: 'start', fs: 11 }); T(480, 330, '■ time (per cell, causal)', { fill: '#fb923c', a: 'start', fs: 11 });
+  T(640, 330, '(+ an MLP after each pair, not drawn)', { fill: '#66728a', a: 'start', fs: 11 });
+  T(190, 330, 'runs only to prime', { fill: '#66728a', fs: 11 }); T(915, 330, 'views never mix here', { fill: '#66728a', fs: 11 });
+  svgEl('rect', { x: 318, y: lanes[0] - 34, width: 508, height: lanes[3] - lanes[0] + 68, rx: 10, fill: 'none', stroke: '#fbbf24', 'stroke-dasharray': '5 4' }, svg);
+}
+
+// ------------------------------------------------------------------ 7b: information-flow demo (exact reachability)
+{
+  const cv = $('#cvFlow'), g = cv.getContext('2d');
+  const F = 6, CELLS = ['sky', 'ball', 'car', 'field', 'clock'], VIEWS = ['P1', 'P3'], R = VIEWS.length * CELLS.length;
+  let order = 'ST', src = { f: 2, r: 1 }, layer = 0, reached;
+  const target = { f: F - 1, r: 5 + 1 }; // P3 · ball in the newest frame
+  function reset() { layer = 0; reached = Array.from({ length: F }, () => new Array(R).fill(-1)); reached[src.f][src.r] = 0; draw(); }
+  function kind(l) { const k = order === 'ST' ? ['space', 'time'] : ['time', 'space']; return k[(l - 1) % 2]; }
+  function step() {
+    layer++;
+    const prev = reached.map((col) => col.slice());
+    if (kind(layer) === 'space') { for (let f = 0; f < F; f++) if (prev[f].some((v) => v >= 0)) for (let r = 0; r < R; r++) if (reached[f][r] < 0) reached[f][r] = layer; }
+    else { for (let f = 0; f < F; f++) for (let r = 0; r < R; r++) if (prev[f][r] >= 0) for (let f2 = f + 1; f2 < F; f2++) if (reached[f2][r] < 0) reached[f2][r] = layer; }
+    draw();
+  }
+  const X0 = 110, Y0 = 46, CW = 70, CH = 27;
+  function draw() {
+    g.fillStyle = '#0a0d13'; g.fillRect(0, 0, cv.width, cv.height);
+    g.font = '600 11px ui-monospace,monospace';
+    for (let f = 0; f < F; f++) { g.fillStyle = f === F - 1 ? '#fbbf24' : '#93a0b4'; g.fillText(f === F - 1 ? 't (new)' : `t-${F - 1 - f}`, X0 + f * CW + 10, Y0 - 10); }
+    for (let r = 0; r < R; r++) {
+      const v = Math.floor(r / CELLS.length), y = Y0 + r * CH + v * 8;
+      g.fillStyle = '#c8d1de'; g.font = '11px Inter, sans-serif'; g.fillText(`${VIEWS[v]} · ${CELLS[r % CELLS.length]}`, 6, y + CH * 0.65);
+      for (let f = 0; f < F; f++) {
+        const x = X0 + f * CW, val = reached[f][r];
+        let fill = '#1b2330';
+        if (val === 0) fill = '#ffffff';
+        else if (val > 0) fill = kind(val) === 'space' ? 'rgba(251,191,36,0.85)' : 'rgba(251,146,60,0.85)';
+        g.fillStyle = fill; g.fillRect(x + 4, y + 2, CW - 8, CH - 4);
+        if (val > 0) { g.fillStyle = '#0b0e14'; g.font = '700 10px ui-monospace,monospace'; g.fillText(`L${val}`, x + CW / 2 - 8, y + CH * 0.65); }
+        if (f === target.f && r === target.r) { g.strokeStyle = '#4ade80'; g.lineWidth = 2.5; g.strokeRect(x + 2, y, CW - 4, CH); }
+        if (f < src.f && val < 0) { g.fillStyle = 'rgba(248,113,113,0.12)'; g.fillRect(x + 4, y + 2, CW - 8, CH - 4); }
+      }
+    }
+    const nextK = kind(layer + 1), blk = Math.floor(layer / 2) + 1;
+    g.fillStyle = '#e6ebf2'; g.font = '700 12px Inter, sans-serif';
+    g.fillText(layer === 0 ? 'start: information exists only in the white token' : `after layer ${layer} (block ${Math.ceil(layer / 2)} · ${kind(layer)})`, X0, cv.height - 30);
+    g.fillStyle = '#93a0b4'; g.font = '11px Inter, sans-serif';
+    g.fillText(`next: block ${blk} · ${nextK} · green = target (P3 ball, newest frame)`, X0, cv.height - 12);
+    const hit = reached[target.f][target.r];
+    const notes = {
+      0: 'Click any square to choose where the information starts (default: P1 · ball, three frames ago). Then press "next layer".',
+    };
+    let note = notes[layer] ?? '';
+    if (layer > 0) {
+      const k = kind(layer);
+      note = k === 'space'
+        ? `<b class="c-wm">Space layer:</b> every token in a frame that already holds the information shares it <b>sideways</b> with the whole frame, including the other player's view (amber).`
+        : `<b class="c-noise">Time layer:</b> every informed cell passes it <b>forward</b> to the same cell in all later frames (orange). Earlier frames stay dark: time attention never looks into the future, so information can't flow backwards.`;
+      if (hit > 0) note += ` <b style="color:var(--good)">The target was reached at layer ${hit}.</b> From here on nothing new is reached, but every further layer still <i>adds</i> to these tokens, combining this information with everything else.`;
+    }
+    $('#flowNote').innerHTML = note;
+  }
+  cv.addEventListener('click', (e) => {
+    const r = cv.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * cv.width, y = ((e.clientY - r.top) / r.height) * cv.height;
+    const f = Math.floor((x - X0) / CW); if (f < 0 || f >= F) return;
+    for (let rr = 0; rr < R; rr++) { const v = Math.floor(rr / CELLS.length), yy = Y0 + rr * CH + v * 8; if (y >= yy && y < yy + CH) { src = { f, r: rr }; reset(); return; } }
+  });
+  $('#flowNext').onclick = () => { if (layer < 6) step(); };
+  $('#flowReset').onclick = reset;
+  $$('#flowOrder button').forEach((b) => (b.onclick = () => { order = b.dataset.o; $$('#flowOrder button').forEach((x) => x.classList.toggle('on', x === b)); reset(); }));
+  reset();
+}
+
+// ------------------------------------------------------------------ 7c: KV-cache depth alignment
+{
+  const svg = $('#cacheSvg');
+  const T = (x, y, t, o = {}) => (svgEl('text', { x, y, fill: o.fill || '#93a0b4', 'font-size': o.fs || 10.5, 'text-anchor': o.a || 'middle', 'font-weight': o.fw || 400 }, svg).textContent = t);
+  const B = 8, cols = ['t-19', '…', 't-3', 't-2', 't-1', 't (new)'], x0 = 90, cw = 72, y0 = 40, rh = 30;
+  cols.forEach((c, i) => T(x0 + i * cw + 30, y0 - 12, c, { fill: i === 5 ? '#fbbf24' : '#93a0b4', fw: i === 5 ? 700 : 400 }));
+  for (let b = 0; b < B; b++) {
+    const y = y0 + (B - 1 - b) * rh, lbl = b === B - 1 ? 'block 16' : b === 0 ? 'block 1' : b === B - 2 ? '…' : `block ${b + 1}`;
+    T(40, y + 18, lbl, { a: 'middle' });
+    cols.forEach((c, i) => {
+      if (c === '…') { T(x0 + i * cw + 30, y + 18, '…'); return; }
+      svgEl('rect', { x: x0 + i * cw, y: y + 3, width: 60, height: rh - 8, rx: 4, fill: i === 5 ? '#fbbf24' : '#a78bfa', 'fill-opacity': i === 5 ? 0.5 : 0.18, stroke: i === 5 ? '#fbbf24' : '#a78bfa', 'stroke-opacity': 0.5 }, svg);
+      if (i < 5) T(x0 + i * cw + 30, y + 18, 'K,V', { fs: 9.5, fill: '#c8d1de' });
+    });
+    if (b === 3) for (let i = 0; i < 5; i++) if (cols[i] !== '…') svgEl('path', { d: `M${x0 + 5 * cw},${y + 15} C ${x0 + 5 * cw - 20},${y - 6} ${x0 + i * cw + 60 + 10},${y - 6} ${x0 + i * cw + 60},${y + 10}`, stroke: '#fb923c', 'stroke-width': 1.5, fill: 'none' }, svg);
+  }
+  T(280, y0 + B * rh + 14, 'new frame at block ℓ attends to the cached block-ℓ keys/values of past frames (orange)', { fill: '#fb923c', fs: 10.5 });
+  T(280, y0 + B * rh + 30, 'purple = stored when that frame was new · amber = computed now, then stored', { fs: 10.5 });
+  svgEl('path', { d: `M${x0 + 5 * cw + 66},${y0 + B * rh - 6} L${x0 + 5 * cw + 66},${y0 + 4}`, stroke: '#fbbf24', 'stroke-width': 2 }, svg);
+  svgEl('path', { d: `M${x0 + 5 * cw + 66},${y0} l-5,9 h10 z`, fill: '#fbbf24' }, svg);
+}
