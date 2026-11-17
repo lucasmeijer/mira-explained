@@ -26,12 +26,14 @@ a real DINOv3 encoder, flow-matching and decoder models you train yourself, and 
 
 ```bash
 npm install
-./scripts/fetch_assets.sh   # downloads DINOv3 ONNX weights, onnxruntime-web, official MIRA videos; extracts frames (needs curl + ffmpeg)
-npm run dev                 # http://localhost:5173
-npm run build               # static site in dist/ (loads DINOv3 + onnxruntime from Hugging Face / jsDelivr CDNs)
+npm run build               # static site in dist/ — deploy anywhere (Cloudflare Pages: build `npm run build`, output `dist`)
+npm run dev                 # local dev server, http://localhost:5173
 ```
 
-The large and third-party assets (videos, frames, model weights, WASM runtime) are **not committed**. `fetch_assets.sh` recreates them.
+The videos and frames used by the site are committed under `public/`. In production the DINOv3 weights (86 MB) and the
+onnxruntime-web WASM are loaded from the Hugging Face and jsDelivr CDNs, because they exceed static-hosting file limits.
+For **local dev** of Chapter 01, run `./scripts/fetch_assets.sh` once (needs curl + ffmpeg) to get local copies.
+The offline scripts in `scripts/` additionally need `npm i --no-save onnxruntime-node playwright`.
 
 ## Honesty notes
 

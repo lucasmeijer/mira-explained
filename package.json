@@ -1,24 +1,15 @@
 {
-  "name": "mira-explainers",
+  "name": "mira-explained",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Interactive in-browser explainer of the MIRA multiplayer world model",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
     "build": "vite build && rm -rf dist/ort dist/models/dinov3-s16",
     "preview": "vite preview --port 4173"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "module",
   "devDependencies": {
-    "playwright": "^1.64.1",
-    "vite": "^8.3.5",
-    "wrangler": "^4.156.2"
+    "vite": "^8.3.5"
   },
-  "dependencies": {
-    "onnxruntime-node": "^1.31.1"
-  }
+  "private": true
 }

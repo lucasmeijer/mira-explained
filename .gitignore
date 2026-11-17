@@ -1,6 +1,5 @@
 node_modules/
 dist/
+# large / CDN-served at runtime (see scripts/fetch_assets.sh for local dev)
 public/models/dinov3-s16/
 public/ort/
-public/media/
-public/frames/
