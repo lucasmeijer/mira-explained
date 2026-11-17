@@ -9,7 +9,7 @@ const page = await browser.newPage({ viewport: { width: +(width || 1280), height
 const logs = [];
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
-await page.goto(`http://localhost:5173/${page_}`, { waitUntil: 'networkidle' });
+await page.goto(`${process.env.BASE || 'http://localhost:5173'}/${page_}`, { waitUntil: 'networkidle' });
 if (steps) { const fn = new Function('page', `return (async () => { ${fs.readFileSync(steps, 'utf8')} })()`); await fn(page); }
 await page.screenshot({ path: out, fullPage: !process.env.NOFULL });
 console.log(logs.join('\n'));

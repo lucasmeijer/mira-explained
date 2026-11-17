@@ -1,5 +1,7 @@
 # MIRA, explained: an interactive series
 
+**Live: https://mira-explained.pages.dev**
+
 An interactive, in-browser explainer of **MIRA: Multiplayer Interactive World Models with Representation Autoencoders**
 (General Intuition × Kyutai × Epic Games, [arXiv 2607.05352](https://arxiv.org/abs/2607.05352)). It covers a real-time, 4-player
 Rocket League world model, taken apart one component at a time. Most demos are **real models running in your browser**:
@@ -30,6 +32,7 @@ npm run build               # static site in dist/ — deploy anywhere (Cloudfla
 npm run dev                 # local dev server, http://localhost:5173
 ```
 
+Every push to `main` is built and deployed to Cloudflare Pages by `.github/workflows/deploy.yml`.
 The videos and frames used by the site are committed under `public/`. In production the DINOv3 weights (86 MB) and the
 onnxruntime-web WASM are loaded from the Hugging Face and jsDelivr CDNs, because they exceed static-hosting file limits.
 For **local dev** of Chapter 01, run `./scripts/fetch_assets.sh` once (needs curl + ffmpeg) to get local copies.
